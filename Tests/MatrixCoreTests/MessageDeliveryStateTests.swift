@@ -26,6 +26,18 @@ func ownAcceptedMessageWithReadReceiptsIsShownAsEchoed() {
 }
 
 @Test
+func ownSendingMessageWithServerEventIDIsShownAsAccepted() {
+    let state = MessageDeliveryState.reconciled(
+        mappedState: .sending,
+        isOwnMessage: true,
+        eventID: "$event:example.com",
+        hasReadReceipts: false
+    )
+
+    #expect(state == .accepted)
+}
+
+@Test
 func permanentFailureWithoutServerAcceptanceStaysRejected() {
     let state = MessageDeliveryState.reconciled(
         mappedState: .permanentFailure,

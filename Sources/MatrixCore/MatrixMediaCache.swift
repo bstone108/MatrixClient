@@ -5,9 +5,25 @@ import Foundation
 @preconcurrency import MatrixRustSDK
 
 public actor MatrixMediaCache {
+    private enum DownloadTuning {
+        static let thumbnailWidth = 720
+        static let thumbnailHeight = 720
+        static let thumbnailTimeout: Duration = .seconds(12)
+        static let maxAttempts = 3
+    }
+
     private enum CacheVariant: String {
         case original
         case thumbnail
+    }
+
+    private enum FetchReason: Equatable {
+        case automatic
+        case manual
+
+        var surfacesFailure: Bool {
+            self == .manual
+        }
     }
 
     private struct DownloadKey: Hashable {
@@ -18,16 +34,20 @@ public actor MatrixMediaCache {
     private struct PendingDownload {
         let key: DownloadKey
         let item: TimelineItem
+        let recoveryOnly: Bool
     }
 
     private struct RunningDownload {
         let roomID: RoomIdentifier
         let lane: MediaDownloadLane
+        let statusText: String
+        let isRecoveryItem: Bool
     }
 
     private let client: Client
     private let diagnostics: DiagnosticsService
     private let cacheRootURL: URL
+    private let sdkMediaFetchScopeID: String
     private let fileManager: FileManager
 
     private var statesByRoom: [RoomIdentifier: [String: TimelineMediaLoadState]] = [:]
@@ -40,6 +60,8 @@ public actor MatrixMediaCache {
     private var pendingOrder: [DownloadKey] = []
     private var pendingContinuations: [DownloadKey: CheckedContinuation<Void, Error>] = [:]
     private var runningDownloads: [DownloadKey: RunningDownload] = [:]
+    private var suppressedAutomaticDownloads: Set<DownloadKey> = []
+    private var isForegroundSession = false
 
     public init(
         client: Client,
@@ -50,6 +72,7 @@ public actor MatrixMediaCache {
         self.client = client
         self.diagnostics = diagnostics
         self.cacheRootURL = cacheRootURL
+        self.sdkMediaFetchScopeID = cacheRootURL.standardizedFileURL.path
         self.fileManager = fileManager
         try? fileManager.createDirectory(at: cacheRootURL, withIntermediateDirectories: true)
     }
@@ -70,30 +93,35 @@ public actor MatrixMediaCache {
         schedulePendingDownloads()
     }
 
+    public func setSessionForeground(_ isForeground: Bool) {
+        isForegroundSession = isForeground
+        schedulePendingDownloads()
+    }
+
     public func prepareMedia(for item: TimelineItem, prefetchOriginal: Bool) {
         guard let media = item.media else { return }
 
         switch media.kind {
         case .image, .video:
-            ensureThumbnailTask(for: item)
+            ensureThumbnailTask(for: item, reason: .automatic)
             if prefetchOriginal {
                 let thumbnailTask = thumbnailTasks[item.id]
                 Task { [weak self] in
                     _ = await thumbnailTask?.value
                     guard let self else { return }
-                    _ = await self.ensureOriginalTask(for: item).value
+                    _ = await self.ensureOriginalTask(for: item, reason: .automatic).value
                 }
             }
         case .audio, .file:
             if prefetchOriginal {
-                _ = ensureOriginalTask(for: item)
+                _ = ensureOriginalTask(for: item, reason: .automatic)
             }
         }
     }
 
     public func ensureOriginalAvailable(for item: TimelineItem) async -> URL? {
         guard item.media != nil else { return nil }
-        return await ensureOriginalTask(for: item).value
+        return await ensureOriginalTask(for: item, reason: .manual).value
     }
 
     public func prune(roomID: RoomIdentifier, keepingItems: [TimelineItem]) {
@@ -109,6 +137,8 @@ public actor MatrixMediaCache {
                 thumbnailTasks[itemID]?.cancel()
                 originalTasks[itemID] = nil
                 thumbnailTasks[itemID] = nil
+                suppressedAutomaticDownloads.remove(DownloadKey(itemID: itemID, variant: .original))
+                suppressedAutomaticDownloads.remove(DownloadKey(itemID: itemID, variant: .thumbnail))
             }
         }
 
@@ -125,12 +155,20 @@ public actor MatrixMediaCache {
         }
     }
 
-    private func ensureThumbnailTask(for item: TimelineItem) {
+    private func ensureThumbnailTask(for item: TimelineItem, reason: FetchReason) {
         guard let media = item.media else { return }
+        let key = DownloadKey(itemID: item.id, variant: .thumbnail)
+        if reason == .manual {
+            suppressedAutomaticDownloads.remove(key)
+            prioritizePendingDownload(key)
+        } else if suppressedAutomaticDownloads.contains(key) {
+            return
+        }
         guard thumbnailTasks[item.id] == nil else { return }
         guard media.kind == .image || media.kind == .video else { return }
 
         if let cachedURL = existingCachedFileURL(for: item, variant: .thumbnail) {
+            suppressedAutomaticDownloads.remove(key)
             updateState(for: item) { state in
                 TimelineMediaLoadState(
                     thumbnailFileURL: cachedURL,
@@ -158,28 +196,26 @@ public actor MatrixMediaCache {
         }
 
         let task = Task<URL?, Never> {
-            do {
-                try await self.awaitDownloadTurn(for: item, variant: .thumbnail)
-                let url = try await self.fetchThumbnailFile(for: item)
-                self.finishThumbnail(itemID: item.id, roomID: item.roomID, url: url)
-                return url
-            } catch is CancellationError {
-                self.cancelThumbnail(itemID: item.id, roomID: item.roomID)
-                return nil
-            } catch {
-                await self.failThumbnail(itemID: item.id, roomID: item.roomID, error: error)
-                return nil
-            }
+            await self.runManagedDownload(for: item, variant: .thumbnail, reason: reason)
         }
         thumbnailTasks[item.id] = task
     }
 
-    private func ensureOriginalTask(for item: TimelineItem) -> Task<URL?, Never> {
+    private func ensureOriginalTask(for item: TimelineItem, reason: FetchReason) -> Task<URL?, Never> {
+        let key = DownloadKey(itemID: item.id, variant: .original)
+        if reason == .manual {
+            suppressedAutomaticDownloads.remove(key)
+            prioritizePendingDownload(key)
+        } else if suppressedAutomaticDownloads.contains(key) {
+            return Task { nil }
+        }
+
         if let existingTask = originalTasks[item.id] {
             return existingTask
         }
 
         if let cachedURL = existingCachedFileURL(for: item, variant: .original) {
+            suppressedAutomaticDownloads.remove(key)
             updateState(for: item) { state in
                 TimelineMediaLoadState(
                     thumbnailFileURL: state.thumbnailFileURL,
@@ -207,36 +243,131 @@ public actor MatrixMediaCache {
         }
 
         let task = Task<URL?, Never> {
-            do {
-                try await self.awaitDownloadTurn(for: item, variant: .original)
-                let url = try await self.fetchOriginalFile(for: item)
-                self.finishOriginal(item: item, url: url)
-                return url
-            } catch is CancellationError {
-                self.cancelOriginal(itemID: item.id, roomID: item.roomID)
-                return nil
-            } catch {
-                await self.failOriginal(itemID: item.id, roomID: item.roomID, error: error)
-                return nil
-            }
+            await self.runManagedDownload(for: item, variant: .original, reason: reason)
         }
         originalTasks[item.id] = task
         return task
+    }
+
+    private func runManagedDownload(
+        for item: TimelineItem,
+        variant: CacheVariant,
+        reason: FetchReason
+    ) async -> URL? {
+        let key = DownloadKey(itemID: item.id, variant: variant)
+        var allowsImmediateStart = true
+        var recoveryOnly = false
+
+        for attempt in 1...DownloadTuning.maxAttempts {
+            do {
+                try await awaitDownloadTurn(
+                    for: item,
+                    variant: variant,
+                    allowsImmediateStart: allowsImmediateStart,
+                    recoveryOnly: recoveryOnly
+                )
+                allowsImmediateStart = true
+                setLoadingState(for: item, variant: variant, isLoading: true, errorDescription: nil)
+
+                let url: URL?
+                switch variant {
+                case .thumbnail:
+                    url = try await fetchThumbnailFile(for: item)
+                    suppressedAutomaticDownloads.remove(key)
+                    finishThumbnail(itemID: item.id, roomID: item.roomID, url: url)
+                case .original:
+                    url = try await fetchOriginalFile(for: item)
+                    suppressedAutomaticDownloads.remove(key)
+                    finishOriginal(item: item, url: url)
+                }
+                return url
+            } catch is CancellationError {
+                switch variant {
+                case .thumbnail:
+                    cancelThumbnail(itemID: item.id, roomID: item.roomID)
+                case .original:
+                    cancelOriginal(itemID: item.id, roomID: item.roomID)
+                }
+                return nil
+            } catch {
+                finishScheduledDownload(itemID: item.id, variant: variant)
+
+                guard attempt < DownloadTuning.maxAttempts else {
+                    suppressedAutomaticDownloads.insert(key)
+                    await diagnostics.record(.notice, category: "Media", message: "Suppressing automatic media fetch after repeated failures", metadata: [
+                        "itemID": item.id,
+                        "variant": variant.rawValue,
+                        "attempts": "\(DownloadTuning.maxAttempts)",
+                        "error": error.localizedDescription
+                    ])
+                    switch variant {
+                    case .thumbnail:
+                        await failThumbnail(
+                            itemID: item.id,
+                            roomID: item.roomID,
+                            error: error,
+                            surfaceError: reason.surfacesFailure
+                        )
+                    case .original:
+                        await failOriginal(
+                            itemID: item.id,
+                            roomID: item.roomID,
+                            error: error,
+                            surfaceError: reason.surfacesFailure
+                        )
+                    }
+                    return nil
+                }
+
+                setLoadingState(for: item, variant: variant, isLoading: false, errorDescription: nil)
+                await diagnostics.record(.notice, category: "Media", message: "Requeued failed media fetch", metadata: [
+                    "itemID": item.id,
+                    "variant": variant.rawValue,
+                    "attempt": "\(attempt)",
+                    "error": error.localizedDescription
+                ])
+                allowsImmediateStart = false
+                recoveryOnly = true
+                continue
+            }
+        }
+
+        return nil
     }
 
     private func fetchThumbnailFile(for item: TimelineItem) async throws -> URL? {
         guard let media = item.media else { return nil }
         let destinationURL = cacheURL(for: item, variant: .thumbnail, preferredExtension: preferredThumbnailExtension(for: media))
 
+        if let directURL = try await directThumbnailDownloadIfPossible(for: item, destinationURL: destinationURL) {
+            return directURL
+        }
+
         if let thumbnailSource = media.thumbnailSourceJSON.flatMap(Self.mediaSource(from:)) {
-            let data = try await client.getMediaThumbnail(mediaSource: thumbnailSource, width: 720, height: 720)
-            try data.write(to: destinationURL, options: .atomic)
+            let data = try await performSDKMediaFetch(priority: .thumbnail) {
+                try await withThrowingTimeout(DownloadTuning.thumbnailTimeout) {
+                    try await self.client.getMediaThumbnail(
+                        mediaSource: thumbnailSource,
+                        width: UInt64(DownloadTuning.thumbnailWidth),
+                        height: UInt64(DownloadTuning.thumbnailHeight)
+                    )
+                }
+            }
+            try data.write(to: destinationURL, options: Data.WritingOptions.atomic)
             return destinationURL
         }
 
         let source = try mediaSource(for: media)
-        let data = try await client.getMediaThumbnail(mediaSource: source, width: 720, height: 720)
-        try data.write(to: destinationURL, options: .atomic)
+        let data = try await performSDKMediaFetch(priority: .thumbnail) {
+            try await withThrowingTimeout(DownloadTuning.thumbnailTimeout) {
+                try await self.client.getMediaThumbnail(
+                    mediaSource: source,
+                    width: UInt64(DownloadTuning.thumbnailWidth),
+                    height: UInt64(DownloadTuning.thumbnailHeight)
+                )
+            }
+        }
+        try data.write(to: destinationURL, options: Data.WritingOptions.atomic)
         return destinationURL
     }
 
@@ -252,13 +383,15 @@ public actor MatrixMediaCache {
         }
 
         let source = try mediaSource(for: media)
-        let handle = try await client.getMediaFile(
-            mediaSource: source,
-            body: media.filename ?? media.body,
-            mimeType: media.mimeType ?? "application/octet-stream",
-            useCache: true,
-            tempDir: roomCacheDirectory(for: item.roomID).path
-        )
+        let handle = try await performSDKMediaFetch(priority: .original) {
+            try await self.client.getMediaFile(
+                mediaSource: source,
+                body: media.filename ?? media.body,
+                mimeType: media.mimeType ?? "application/octet-stream",
+                useCache: true,
+                tempDir: self.roomCacheDirectory(for: item.roomID).path
+            )
+        }
         _ = try handle.persist(path: destinationURL.path)
         return destinationURL
     }
@@ -308,6 +441,69 @@ public actor MatrixMediaCache {
         }
 
         return nil
+    }
+
+    private func directThumbnailDownloadIfPossible(for item: TimelineItem, destinationURL: URL) async throws -> URL? {
+        guard let media = item.media, media.allowsDirectDownload else { return nil }
+        let remoteSource = Self.firstNonEmpty(media.thumbnailSourceURL, media.sourceURL)
+        guard let remoteValue = remoteSource,
+              let remote = Self.parseMXCURL(remoteValue) else {
+            return nil
+        }
+
+        let session = try client.session()
+        guard let homeserverURL = Self.sanitizedHomeserverBaseURL(from: client.homeserver()) else { return nil }
+        let candidateURLs = Self.thumbnailCandidateURLs(
+            serverName: remote.serverName,
+            mediaID: remote.mediaID,
+            homeserverURL: homeserverURL,
+            width: DownloadTuning.thumbnailWidth,
+            height: DownloadTuning.thumbnailHeight
+        )
+
+        for candidateURL in candidateURLs {
+            var request = URLRequest(url: candidateURL)
+            request.httpMethod = "GET"
+            request.setValue("MatrixClient/0.1", forHTTPHeaderField: "User-Agent")
+            request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 8
+
+            do {
+                let downloader = RemoteMediaDownloader()
+                let (downloadedURL, response) = try await downloader.download(
+                    request: request,
+                    destinationURL: destinationURL,
+                    progress: nil,
+                    timeoutInterval: 8
+                )
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    continue
+                }
+
+                let fileSize = (try? fileManager.attributesOfItem(atPath: downloadedURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+                if (200..<300).contains(httpResponse.statusCode), fileSize > 0 {
+                    return downloadedURL
+                }
+
+                try? fileManager.removeItem(at: downloadedURL)
+            } catch {
+                try? fileManager.removeItem(at: destinationURL)
+            }
+        }
+
+        return nil
+    }
+
+    private func performSDKMediaFetch<T: Sendable>(
+        priority: SDKMediaFetchPriority,
+        _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await SDKMediaFetchGateCoordinator.shared.withExclusiveFetch(
+            scopeID: sdkMediaFetchScopeID,
+            priority: priority
+        ) {
+            try await operation()
+        }
     }
 
     private func mediaSource(for media: TimelineMediaAttachment) throws -> MediaSource {
@@ -400,7 +596,12 @@ public actor MatrixMediaCache {
         }
     }
 
-    private func failThumbnail(itemID: String, roomID: RoomIdentifier, error: Error) async {
+    private func failThumbnail(
+        itemID: String,
+        roomID: RoomIdentifier,
+        error: Error,
+        surfaceError: Bool
+    ) async {
         thumbnailTasks[itemID] = nil
         finishScheduledDownload(itemID: itemID, variant: .thumbnail)
         await diagnostics.record(.error, category: "Media", message: "Failed to fetch media thumbnail", metadata: [
@@ -415,12 +616,17 @@ public actor MatrixMediaCache {
                 isLoadingOriginal: state.isLoadingOriginal,
                 receivedBytes: state.receivedBytes,
                 totalBytes: state.totalBytes,
-                errorDescription: state.errorDescription
+                errorDescription: surfaceError ? error.localizedDescription : nil
             )
         }
     }
 
-    private func failOriginal(itemID: String, roomID: RoomIdentifier, error: Error) async {
+    private func failOriginal(
+        itemID: String,
+        roomID: RoomIdentifier,
+        error: Error,
+        surfaceError: Bool
+    ) async {
         originalTasks[itemID] = nil
         finishScheduledDownload(itemID: itemID, variant: .original)
         await diagnostics.record(.error, category: "Media", message: "Failed to fetch original media", metadata: [
@@ -435,7 +641,26 @@ public actor MatrixMediaCache {
                 isLoadingOriginal: false,
                 receivedBytes: state.receivedBytes,
                 totalBytes: state.totalBytes,
-                errorDescription: error.localizedDescription
+                errorDescription: surfaceError ? error.localizedDescription : nil
+            )
+        }
+    }
+
+    private func setLoadingState(
+        for item: TimelineItem,
+        variant: CacheVariant,
+        isLoading: Bool,
+        errorDescription: String?
+    ) {
+        updateState(for: item) { state in
+            TimelineMediaLoadState(
+                thumbnailFileURL: state.thumbnailFileURL,
+                originalFileURL: state.originalFileURL,
+                isLoadingThumbnail: variant == .thumbnail ? isLoading : state.isLoadingThumbnail,
+                isLoadingOriginal: variant == .original ? isLoading : state.isLoadingOriginal,
+                receivedBytes: variant == .original ? 0 : state.receivedBytes,
+                totalBytes: variant == .original ? nil : state.totalBytes,
+                errorDescription: errorDescription
             )
         }
     }
@@ -510,6 +735,40 @@ public actor MatrixMediaCache {
         var urls: [URL] = []
         for path in pathVariants {
             if let url = URL(string: path, relativeTo: homeserverURL)?.absoluteURL {
+                urls.append(url)
+            }
+        }
+
+        return urls
+    }
+
+    static func thumbnailCandidateURLs(
+        serverName: String,
+        mediaID: String,
+        homeserverURL: URL,
+        width: Int,
+        height: Int
+    ) -> [URL] {
+        let encodedServer = serverName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? serverName
+        let encodedMediaID = mediaID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? mediaID
+        let pathVariants = [
+            "/_matrix/client/v1/media/thumbnail/\(encodedServer)/\(encodedMediaID)",
+            "/_matrix/media/v3/thumbnail/\(encodedServer)/\(encodedMediaID)",
+            "/_matrix/media/r0/thumbnail/\(encodedServer)/\(encodedMediaID)",
+        ]
+
+        var urls: [URL] = []
+        for path in pathVariants {
+            guard let baseURL = URL(string: path, relativeTo: homeserverURL)?.absoluteURL,
+                  var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+                continue
+            }
+            components.queryItems = [
+                URLQueryItem(name: "width", value: String(width)),
+                URLQueryItem(name: "height", value: String(height)),
+                URLQueryItem(name: "method", value: "scale")
+            ]
+            if let url = components.url {
                 urls.append(url)
             }
         }
@@ -605,9 +864,15 @@ public actor MatrixMediaCache {
         Self.fileExtension(forMimeType: media.thumbnailMimeType) ?? Self.fileExtension(forMimeType: media.mimeType) ?? "jpg"
     }
 
-    private func awaitDownloadTurn(for item: TimelineItem, variant: CacheVariant) async throws {
+    private func awaitDownloadTurn(
+        for item: TimelineItem,
+        variant: CacheVariant,
+        allowsImmediateStart: Bool = true,
+        recoveryOnly: Bool = false
+    ) async throws {
         let key = DownloadKey(itemID: item.id, variant: variant)
-        if startDownloadIfPossible(for: item, key: key) != nil {
+        if allowsImmediateStart, startDownloadIfPossible(for: item, key: key, recoveryOnly: recoveryOnly) != nil {
+            publishWorkerSnapshots()
             return
         }
 
@@ -618,7 +883,7 @@ public actor MatrixMediaCache {
                     return
                 }
 
-                pendingDownloads[key] = PendingDownload(key: key, item: item)
+                pendingDownloads[key] = PendingDownload(key: key, item: item, recoveryOnly: recoveryOnly)
                 if !pendingOrder.contains(key) {
                     pendingOrder.append(key)
                 }
@@ -632,8 +897,20 @@ public actor MatrixMediaCache {
         }
     }
 
-    private func startDownloadIfPossible(for item: TimelineItem, key: DownloadKey) -> MediaDownloadLane? {
+    private func startDownloadIfPossible(for item: TimelineItem, key: DownloadKey, recoveryOnly: Bool) -> MediaDownloadLane? {
+        if !isForegroundSession {
+            guard runningDownloads.isEmpty else { return nil }
+            let lane: MediaDownloadLane = recoveryOnly ? .recovery : .background
+            let statusText = recoveryOnly ? "Retry" : "Back"
+            runningDownloads[key] = RunningDownload(roomID: item.roomID, lane: lane, statusText: statusText, isRecoveryItem: recoveryOnly)
+            return lane
+        }
+
         let variant = key.variant
+        if variant == .original {
+            return startOriginalDownloadIfPossible(for: item, key: key, recoveryOnly: recoveryOnly)
+        }
+
         guard let lane = MediaDownloadSchedulingPolicy.immediateLane(
             for: item.roomID.rawValue,
             activeRoomID: activeRoomID?.rawValue,
@@ -644,22 +921,87 @@ public actor MatrixMediaCache {
             return nil
         }
 
-        runningDownloads[key] = RunningDownload(roomID: item.roomID, lane: lane)
+        let statusText = lane == .activeRoom ? "Active" : "Back"
+        runningDownloads[key] = RunningDownload(roomID: item.roomID, lane: lane, statusText: statusText, isRecoveryItem: false)
         return lane
     }
 
+    private func startOriginalDownloadIfPossible(
+        for item: TimelineItem,
+        key: DownloadKey,
+        recoveryOnly: Bool
+    ) -> MediaDownloadLane? {
+        if recoveryOnly {
+            guard !isRecoveryLaneOccupied(for: .original) else { return nil }
+            runningDownloads[key] = RunningDownload(
+                roomID: item.roomID,
+                lane: .recovery,
+                statusText: "Retry",
+                isRecoveryItem: true
+            )
+            return .recovery
+        }
+
+        let recoveryBusyWithFailures = hasPendingRecoveryDownloads(for: .original) || isRecoveryLaneRunningFailures(for: .original)
+        let policy: MediaDownloadWorkerPolicy = recoveryBusyWithFailures ? .originalRegularReserved : .originals
+        let runningRoomIDs = recoveryBusyWithFailures
+            ? runningRoomIDs(for: .original, includeRecoveryLane: false)
+            : runningRoomIDs(for: .original, includeRecoveryLane: true)
+
+        guard let decision = MediaDownloadSchedulingPolicy.immediateLane(
+            for: item.roomID.rawValue,
+            activeRoomID: activeRoomID?.rawValue,
+            pendingRoomIDs: orderedPendingRoomIDs(for: .original, recoveryOnly: false),
+            runningRoomIDs: runningRoomIDs,
+            policy: policy
+        ) else {
+            return nil
+        }
+
+        let useRecoveryHelper = !recoveryBusyWithFailures &&
+            !isRecoveryLaneOccupied(for: .original) &&
+            runningRoomIDs.count >= MediaDownloadWorkerPolicy.originalRegularReserved.maxConcurrentDownloads
+
+        let assignedLane: MediaDownloadLane = useRecoveryHelper ? .recovery : decision
+        let statusText = useRecoveryHelper ? "Assist" : (decision == .activeRoom ? "Active" : "Back")
+        runningDownloads[key] = RunningDownload(
+            roomID: item.roomID,
+            lane: assignedLane,
+            statusText: statusText,
+            isRecoveryItem: false
+        )
+        return assignedLane
+    }
+
     private func schedulePendingDownloads() {
+        if !isForegroundSession {
+            scheduleInactiveSessionDownloads()
+            publishWorkerSnapshots()
+            return
+        }
+
         var madeProgress = true
         while madeProgress {
             madeProgress = false
             if schedulePendingDownloads(for: .thumbnail) {
                 madeProgress = true
             }
-            if schedulePendingDownloads(for: .original) {
+            if scheduleOriginalDownloads() {
                 madeProgress = true
             }
         }
         publishWorkerSnapshots()
+    }
+
+    private func scheduleInactiveSessionDownloads() {
+        guard runningDownloads.isEmpty else { return }
+        if let nextThumbnailKey = orderedPendingKeys(for: .thumbnail).first {
+            startPendingDownload(for: nextThumbnailKey, lane: .background)
+            return
+        }
+        if let nextOriginalKey = orderedPendingKeys(for: .original).first {
+            startPendingDownload(for: nextOriginalKey, lane: .background)
+        }
     }
 
     private func schedulePendingDownloads(for variant: CacheVariant) -> Bool {
@@ -678,13 +1020,59 @@ public actor MatrixMediaCache {
         return true
     }
 
+    private func scheduleOriginalDownloads() -> Bool {
+        if !isRecoveryLaneOccupied(for: .original),
+           let recoveryKey = orderedPendingKeys(for: .original, recoveryOnly: true).first {
+            startPendingDownload(for: recoveryKey, lane: .recovery)
+            return true
+        }
+
+        let recoveryBusyWithFailures = hasPendingRecoveryDownloads(for: .original) || isRecoveryLaneRunningFailures(for: .original)
+        let policy: MediaDownloadWorkerPolicy = recoveryBusyWithFailures ? .originalRegularReserved : .originals
+        let runningRoomIDs = recoveryBusyWithFailures
+            ? runningRoomIDs(for: .original, includeRecoveryLane: false)
+            : runningRoomIDs(for: .original, includeRecoveryLane: true)
+        let orderedKeys = orderedPendingKeys(for: .original, recoveryOnly: false)
+        let pendingRoomIDs = orderedKeys.compactMap { pendingDownloads[$0]?.item.roomID.rawValue }
+
+        guard let decision = MediaDownloadSchedulingPolicy.nextPendingDecision(
+            activeRoomID: activeRoomID?.rawValue,
+            pendingRoomIDs: pendingRoomIDs,
+            runningRoomIDs: runningRoomIDs,
+            policy: policy
+        ), decision.pendingIndex < orderedKeys.count else {
+            return false
+        }
+
+        let useRecoveryHelper = !recoveryBusyWithFailures &&
+            !isRecoveryLaneOccupied(for: .original) &&
+            runningRoomIDs.count >= MediaDownloadWorkerPolicy.originalRegularReserved.maxConcurrentDownloads
+
+        startPendingDownload(for: orderedKeys[decision.pendingIndex], lane: useRecoveryHelper ? .recovery : decision.lane)
+        return true
+    }
+
     private func startPendingDownload(for key: DownloadKey, lane: MediaDownloadLane) {
         guard let pending = pendingDownloads[key] else { return }
         guard let continuation = pendingContinuations.removeValue(forKey: key) else { return }
         pendingDownloads.removeValue(forKey: key)
         pendingOrder.removeAll { $0 == key }
 
-        runningDownloads[key] = RunningDownload(roomID: pending.item.roomID, lane: lane)
+        let statusText: String
+        switch lane {
+        case .activeRoom:
+            statusText = "Active"
+        case .background:
+            statusText = "Back"
+        case .recovery:
+            statusText = pending.recoveryOnly ? "Retry" : "Assist"
+        }
+        runningDownloads[key] = RunningDownload(
+            roomID: pending.item.roomID,
+            lane: lane,
+            statusText: statusText,
+            isRecoveryItem: pending.recoveryOnly
+        )
         continuation.resume()
     }
 
@@ -694,6 +1082,13 @@ public actor MatrixMediaCache {
         guard let continuation = pendingContinuations.removeValue(forKey: key) else { return }
         continuation.resume(throwing: CancellationError())
         publishWorkerSnapshots()
+    }
+
+    private func prioritizePendingDownload(_ key: DownloadKey) {
+        guard pendingDownloads[key] != nil else { return }
+        pendingOrder.removeAll { $0 == key }
+        pendingOrder.insert(key, at: 0)
+        schedulePendingDownloads()
     }
 
     private func finishScheduledDownload(itemID: String, variant: CacheVariant) {
@@ -709,23 +1104,44 @@ public actor MatrixMediaCache {
         schedulePendingDownloads()
     }
 
-    private func orderedPendingKeys(for variant: CacheVariant? = nil) -> [DownloadKey] {
+    private func orderedPendingKeys(for variant: CacheVariant? = nil, recoveryOnly: Bool? = nil) -> [DownloadKey] {
         pendingOrder.filter { key in
             guard let pending = pendingDownloads[key] else { return false }
             guard let variant else { return true }
-            return pending.key.variant == variant
+            guard pending.key.variant == variant else { return false }
+            if let recoveryOnly {
+                return pending.recoveryOnly == recoveryOnly
+            }
+            return true
         }
     }
 
-    private func orderedPendingRoomIDs(for variant: CacheVariant) -> [String] {
-        orderedPendingKeys(for: variant).compactMap { pendingDownloads[$0]?.item.roomID.rawValue }
+    private func orderedPendingRoomIDs(for variant: CacheVariant, recoveryOnly: Bool? = nil) -> [String] {
+        orderedPendingKeys(for: variant, recoveryOnly: recoveryOnly).compactMap { pendingDownloads[$0]?.item.roomID.rawValue }
     }
 
-    private func runningRoomIDs(for variant: CacheVariant? = nil) -> [String] {
+    private func runningRoomIDs(for variant: CacheVariant? = nil, includeRecoveryLane: Bool = true) -> [String] {
         runningDownloads.compactMap { key, value in
             guard variant == nil || key.variant == variant else { return nil }
+            guard includeRecoveryLane || value.lane != .recovery else { return nil }
             return value.roomID.rawValue
         }
+    }
+
+    private func isRecoveryLaneOccupied(for variant: CacheVariant) -> Bool {
+        runningDownloads.contains { key, value in
+            key.variant == variant && value.lane == .recovery
+        }
+    }
+
+    private func isRecoveryLaneRunningFailures(for variant: CacheVariant) -> Bool {
+        runningDownloads.contains { key, value in
+            key.variant == variant && value.lane == .recovery && value.isRecoveryItem
+        }
+    }
+
+    private func hasPendingRecoveryDownloads(for variant: CacheVariant) -> Bool {
+        orderedPendingKeys(for: variant, recoveryOnly: true).isEmpty == false
     }
 
     private func workerPolicy(for variant: CacheVariant) -> MediaDownloadWorkerPolicy {
@@ -743,25 +1159,30 @@ public actor MatrixMediaCache {
 
     private func makeWorkerSnapshots() -> [MediaDownloadWorkerSnapshot] {
         makeWorkerSnapshots(for: .thumbnail, workerCount: 2) +
-            makeWorkerSnapshots(for: .original, workerCount: 3)
+            makeWorkerSnapshots(for: .original, workerCount: 2, kind: .original, recoveryOnly: false) +
+            [makeRecoveryWorkerSnapshot()]
     }
 
-    private func makeWorkerSnapshots(for variant: CacheVariant, workerCount: Int) -> [MediaDownloadWorkerSnapshot] {
-        let runningEntries = orderedRunningEntries(for: variant)
-        let pendingCount = orderedPendingKeys(for: variant).count
-        let kind: MediaDownloadWorkerKind = variant == .thumbnail ? .thumbnail : .original
+    private func makeWorkerSnapshots(
+        for variant: CacheVariant,
+        workerCount: Int,
+        kind: MediaDownloadWorkerKind? = nil,
+        recoveryOnly: Bool? = nil
+    ) -> [MediaDownloadWorkerSnapshot] {
+        let runningEntries = orderedRunningEntries(for: variant, recoveryOnly: recoveryOnly)
+        let pendingCount = orderedPendingKeys(for: variant, recoveryOnly: recoveryOnly).count
+        let resolvedKind: MediaDownloadWorkerKind = kind ?? (variant == .thumbnail ? .thumbnail : .original)
 
         return (0..<workerCount).map { index in
-            let label = workerLabel(for: variant, slot: index + 1)
+            let label = workerLabel(for: variant, kind: resolvedKind, slot: index + 1)
             if runningEntries.indices.contains(index) {
                 let (key, running) = runningEntries[index]
-                let statusText = running.lane == .activeRoom ? "Active" : "Back"
                 return MediaDownloadWorkerSnapshot(
-                    workerID: "\(variant.rawValue)-\(index + 1)",
-                    kind: kind,
+                    workerID: "\(resolvedKind.rawValue)-\(index + 1)",
+                    kind: resolvedKind,
                     slot: index + 1,
                     label: label,
-                    statusText: statusText,
+                    statusText: running.statusText,
                     pendingCount: pendingCount,
                     roomID: running.roomID.rawValue,
                     itemID: key.itemID
@@ -769,8 +1190,8 @@ public actor MatrixMediaCache {
             }
 
             return MediaDownloadWorkerSnapshot(
-                workerID: "\(variant.rawValue)-\(index + 1)",
-                kind: kind,
+                workerID: "\(resolvedKind.rawValue)-\(index + 1)",
+                kind: resolvedKind,
                 slot: index + 1,
                 label: label,
                 statusText: "Idle",
@@ -781,12 +1202,28 @@ public actor MatrixMediaCache {
         }
     }
 
-    private func orderedRunningEntries(for variant: CacheVariant) -> [(DownloadKey, RunningDownload)] {
+    private func orderedRunningEntries(for variant: CacheVariant, recoveryOnly: Bool? = nil) -> [(DownloadKey, RunningDownload)] {
         runningDownloads
-            .filter { $0.key.variant == variant }
+            .filter { entry in
+                guard entry.key.variant == variant else { return false }
+                if let recoveryOnly {
+                    return entry.value.isRecoveryItem == recoveryOnly || (recoveryOnly == false && entry.value.lane != .recovery)
+                }
+                return true
+            }
             .sorted { lhs, rhs in
+                let laneRank: (MediaDownloadLane) -> Int = { lane in
+                    switch lane {
+                    case .activeRoom:
+                        return 0
+                    case .background:
+                        return 1
+                    case .recovery:
+                        return 2
+                    }
+                }
                 if lhs.value.lane != rhs.value.lane {
-                    return lhs.value.lane == .activeRoom
+                    return laneRank(lhs.value.lane) < laneRank(rhs.value.lane)
                 }
                 if lhs.value.roomID != rhs.value.roomID {
                     return lhs.value.roomID.rawValue < rhs.value.roomID.rawValue
@@ -795,12 +1232,46 @@ public actor MatrixMediaCache {
             }
     }
 
-    private func workerLabel(for variant: CacheVariant, slot: Int) -> String {
-        switch variant {
+    private func makeRecoveryWorkerSnapshot() -> MediaDownloadWorkerSnapshot {
+        let pendingCount = orderedPendingKeys(for: .original, recoveryOnly: true).count
+        let runningEntry = runningDownloads.first { key, value in
+            key.variant == .original && value.lane == .recovery
+        }
+        let label = workerLabel(for: .original, kind: .recovery, slot: 1)
+
+        if let (key, running) = runningEntry {
+            return MediaDownloadWorkerSnapshot(
+                workerID: "\(MediaDownloadWorkerKind.recovery.rawValue)-1",
+                kind: .recovery,
+                slot: 1,
+                label: label,
+                statusText: running.statusText,
+                pendingCount: pendingCount,
+                roomID: running.roomID.rawValue,
+                itemID: key.itemID
+            )
+        }
+
+        return MediaDownloadWorkerSnapshot(
+            workerID: "\(MediaDownloadWorkerKind.recovery.rawValue)-1",
+            kind: .recovery,
+            slot: 1,
+            label: label,
+            statusText: "Idle",
+            pendingCount: pendingCount,
+            roomID: nil,
+            itemID: nil
+        )
+    }
+
+    private func workerLabel(for variant: CacheVariant, kind: MediaDownloadWorkerKind, slot: Int) -> String {
+        switch kind {
         case .thumbnail:
             return "Thumb \(slot)"
         case .original:
             return "Orig \(slot)"
+        case .recovery:
+            return "Fail \(slot)"
         }
     }
 
@@ -833,9 +1304,29 @@ public actor MatrixMediaCache {
     }
 }
 
+private func withThrowingTimeout<T: Sendable>(
+    _ duration: Duration,
+    operation: @escaping @Sendable () async throws -> T
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            try await operation()
+        }
+        group.addTask {
+            try await Task.sleep(for: duration)
+            throw MediaFetchTimeoutError()
+        }
+
+        let result = try await group.next()!
+        group.cancelAll()
+        return result
+    }
+}
+
 enum MediaDownloadLane: Equatable {
     case activeRoom
     case background
+    case recovery
 }
 
 struct MediaDownloadWorkerPolicy: Equatable {
@@ -848,6 +1339,13 @@ struct MediaDownloadWorkerPolicy: Equatable {
         maxConcurrentDownloads: 3,
         maxActiveRoomDownloads: 2,
         maxBackgroundDownloadsWhileActiveBusy: 1,
+        blocksBackgroundWhileActiveRunning: true
+    )
+
+    static let originalRegularReserved = MediaDownloadWorkerPolicy(
+        maxConcurrentDownloads: 2,
+        maxActiveRoomDownloads: 2,
+        maxBackgroundDownloadsWhileActiveBusy: 0,
         blocksBackgroundWhileActiveRunning: true
     )
 
@@ -961,11 +1459,89 @@ private enum MediaCacheError: LocalizedError {
     }
 }
 
+private struct MediaFetchTimeoutError: LocalizedError {
+    var errorDescription: String? {
+        "Media fetch timed out."
+    }
+}
+
+enum SDKMediaFetchPriority: Int, Comparable, Sendable {
+    case thumbnail = 0
+    case avatar = 1
+    case original = 2
+
+    static func < (lhs: SDKMediaFetchPriority, rhs: SDKMediaFetchPriority) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+actor SDKMediaFetchGateCoordinator {
+    static let shared = SDKMediaFetchGateCoordinator()
+
+    private struct Waiter {
+        let priority: SDKMediaFetchPriority
+        let sequence: Int
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private var activeScopeIDs: Set<String> = []
+    private var waitersByScopeID: [String: [Waiter]] = [:]
+    private var nextSequence = 0
+
+    func withExclusiveFetch<T: Sendable>(
+        scopeID: String,
+        priority: SDKMediaFetchPriority,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        await acquire(scopeID: scopeID, priority: priority)
+        defer {
+            release(scopeID: scopeID)
+        }
+        return try await operation()
+    }
+
+    private func acquire(scopeID: String, priority: SDKMediaFetchPriority) async {
+        if !activeScopeIDs.contains(scopeID) {
+            activeScopeIDs.insert(scopeID)
+            return
+        }
+
+        let sequence = nextSequence
+        nextSequence += 1
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            waitersByScopeID[scopeID, default: []].append(
+                Waiter(priority: priority, sequence: sequence, continuation: continuation)
+            )
+        }
+    }
+
+    private func release(scopeID: String) {
+        guard var waiters = waitersByScopeID[scopeID], !waiters.isEmpty else {
+            activeScopeIDs.remove(scopeID)
+            waitersByScopeID[scopeID] = nil
+            return
+        }
+
+        waiters.sort { lhs, rhs in
+            if lhs.priority != rhs.priority {
+                return lhs.priority < rhs.priority
+            }
+            return lhs.sequence < rhs.sequence
+        }
+
+        let nextWaiter = waiters.removeFirst()
+        waitersByScopeID[scopeID] = waiters.isEmpty ? nil : waiters
+        nextWaiter.continuation.resume()
+    }
+}
+
 private final class RemoteMediaDownloader: NSObject, @unchecked Sendable {
     func download(
         request: URLRequest,
         destinationURL: URL,
-        progress: (@Sendable (Int64, Int64?) async -> Void)?
+        progress: (@Sendable (Int64, Int64?) async -> Void)?,
+        timeoutInterval: TimeInterval = 30
     ) async throws -> (URL, URLResponse) {
         let delegate = RemoteMediaDownloadDelegate(
             destinationURL: destinationURL,
@@ -974,7 +1550,8 @@ private final class RemoteMediaDownloader: NSObject, @unchecked Sendable {
             progress: progress
         )
         let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForRequest = timeoutInterval
+        configuration.timeoutIntervalForResource = timeoutInterval
         configuration.waitsForConnectivity = true
         let session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
 

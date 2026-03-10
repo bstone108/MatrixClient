@@ -71,6 +71,11 @@ final class StoredSessionStore: NSObject, ClientSessionDelegate, @unchecked Send
 
         let query = keychainQuery(account: record.userID)
         SecItemDelete(query as CFDictionary)
+
+        let accountRoot = rootURL
+            .appendingPathComponent("Accounts", isDirectory: true)
+            .appendingPathComponent(record.storeKey, isDirectory: true)
+        try? FileManager.default.removeItem(at: accountRoot)
     }
 
     func restoreSession(for record: PersistedAccountSession) throws -> Session {

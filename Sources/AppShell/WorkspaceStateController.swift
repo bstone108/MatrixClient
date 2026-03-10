@@ -33,6 +33,8 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private var verificationTask: Task<Void, Never>?
     private var workerTask: Task<Void, Never>?
     private var knownRoomDisplayNames: [RoomIdentifier: String] = [:]
+    private var pendingPreferredAccountID: AccountIdentifier?
+    private var pendingPreferredSettingsDestination: WorkspaceSettingsDestination?
 
     public private(set) var sessionState: ClientSessionState = .launching
     public private(set) var accounts: [AccountSummary] = []
@@ -47,6 +49,9 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     public private(set) var selectedRoomID: RoomIdentifier?
     public private(set) var selectedSettingsDestination: WorkspaceSettingsDestination?
     public private(set) var selectedRoomDetails: RoomDetails?
+    public private(set) var accountOperationStatusMessage: String?
+    public private(set) var isPerformingAccountOperation = false
+    public private(set) var notificationPreferences: NotificationPreferences
 
     public var selectedAccountSummary: AccountSummary? {
         guard let selectedAccountID else { return nil }
@@ -75,6 +80,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         self.diagnostics = diagnostics
         self.supportBundleBuilder = supportBundleBuilder
         self.defaults = defaults
+        self.notificationPreferences = NotificationPreferences(defaults: defaults)
     }
 
     public func bootstrap() {
@@ -122,10 +128,10 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     }
 
     public func selectAccount(_ accountID: AccountIdentifier) {
-        guard selectedAccountID != accountID else { return }
+        guard selectedAccountID != accountID || selectedSpaceID != nil || selectedSettingsDestination != nil else { return }
         Task { [weak self] in
             guard let self else { return }
-            await self.loadAccount(accountID)
+            await self.loadAccount(accountID, restorePersistedSelection: false)
         }
     }
 
@@ -179,6 +185,22 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         }
     }
 
+    public func joinSelectedRoom() {
+        guard let selectedRoomID, let selectedAccountID else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.matrixClient.joinRoom(selectedRoomID, accountID: selectedAccountID)
+                self.selectedSettingsDestination = nil
+                await self.loadRoomDetails()
+                await self.subscribeToRoomList()
+            } catch {
+                self.accountOperationStatusMessage = error.localizedDescription
+                self.notify(self.sessionObservers)
+            }
+        }
+    }
+
     public func exportSupportBundle() async throws -> URL {
         let queueData = try JSONEncoder.prettyPrinted.encode(await matrixClient.queueDiagnostics())
         return try await supportBundleBuilder.exportBundle(attachments: [
@@ -191,6 +213,89 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
             guard let self else { return }
             await self.matrixClient.login(serverNameOrURL: serverNameOrURL, username: username, password: password)
         }
+    }
+
+    public func addAccount(serverNameOrURL: String?, username: String, password: String) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedPassword = password.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !normalizedUsername.isEmpty, !normalizedPassword.isEmpty else {
+                self.accountOperationStatusMessage = "Enter a username and password."
+                self.notify(self.sessionObservers)
+                return
+            }
+
+            self.isPerformingAccountOperation = true
+            self.accountOperationStatusMessage = "Adding account…"
+            self.notify(self.sessionObservers)
+
+            do {
+                let account = try await self.matrixClient.addAccount(
+                    serverNameOrURL: serverNameOrURL,
+                    username: normalizedUsername,
+                    password: normalizedPassword
+                )
+                self.pendingPreferredAccountID = account.accountID
+                self.pendingPreferredSettingsDestination = .accounts
+                self.persistSelectedSettingsDestination(.accounts, for: account.accountID)
+                await self.loadConnectedState()
+                self.accountOperationStatusMessage = "Added \(account.displayName)."
+            } catch {
+                self.accountOperationStatusMessage = error.localizedDescription
+            }
+
+            self.isPerformingAccountOperation = false
+            self.notify(self.sessionObservers)
+        }
+    }
+
+    public func removeCurrentAccount() {
+        guard let selectedAccountID else { return }
+
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            let fallbackAccountID = self.accounts
+                .map(\.accountID)
+                .first(where: { $0 != selectedAccountID })
+
+            self.isPerformingAccountOperation = true
+            self.accountOperationStatusMessage = "Removing account…"
+            self.notify(self.sessionObservers)
+
+            do {
+                try await self.matrixClient.removeAccount(selectedAccountID)
+                self.clearPersistedSelectionState(for: selectedAccountID)
+                self.pendingPreferredAccountID = fallbackAccountID
+                self.pendingPreferredSettingsDestination = fallbackAccountID == nil ? nil : .accounts
+                if let fallbackAccountID {
+                    self.persistSelectedSettingsDestination(.accounts, for: fallbackAccountID)
+                    await self.loadConnectedState()
+                } else {
+                    self.clearWorkspaceState()
+                }
+                self.accountOperationStatusMessage = "Removed account."
+            } catch {
+                self.accountOperationStatusMessage = error.localizedDescription
+            }
+
+            self.isPerformingAccountOperation = false
+            self.notify(self.sessionObservers)
+        }
+    }
+
+    public func setDesktopNotificationsEnabled(_ isEnabled: Bool) {
+        defaults.set(isEnabled, forKey: NotificationDefaultsKey.desktopNotificationsEnabled)
+        notificationPreferences = NotificationPreferences(defaults: defaults)
+        notify(sessionObservers)
+    }
+
+    public func setNotificationSoundEnabled(_ isEnabled: Bool) {
+        defaults.set(isEnabled, forKey: NotificationDefaultsKey.soundEnabled)
+        notificationPreferences = NotificationPreferences(defaults: defaults)
+        notify(sessionObservers)
     }
 
     public func mediaState(for itemID: String) -> TimelineMediaLoadState? {
@@ -285,6 +390,11 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
                 await self.loadConnectedState()
             }
         case .signedOut:
+            pendingPreferredAccountID = nil
+            pendingPreferredSettingsDestination = nil
+            Task {
+                await matrixClient.setActiveAccount(nil)
+            }
             clearWorkspaceState()
         case .launching, .restoring, .signingIn:
             if accounts.isEmpty {
@@ -298,29 +408,32 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         accounts = await matrixClient.accountSummaries()
         notify(sidebarObservers)
         guard !accounts.isEmpty else {
+            await matrixClient.setActiveAccount(nil)
             clearWorkspaceState()
             return
         }
 
+        let preferredAccountID = pendingPreferredAccountID
         let persistedAccountID = persistedSelectedAccountID()
-        let accountToLoad: AccountIdentifier
-        if let persistedAccountID, accounts.contains(where: { $0.accountID == persistedAccountID }) {
-            accountToLoad = persistedAccountID
-        } else if let selectedAccountID, accounts.contains(where: { $0.accountID == selectedAccountID }) {
-            accountToLoad = selectedAccountID
-        } else {
-            accountToLoad = accounts[0].accountID
-        }
+        let accountToLoad = preferredAccountID
+            .flatMap { preferred in accounts.first(where: { $0.accountID == preferred })?.accountID }
+            ?? persistedAccountID.flatMap { persisted in accounts.first(where: { $0.accountID == persisted })?.accountID }
+            ?? selectedAccountID.flatMap { current in accounts.first(where: { $0.accountID == current })?.accountID }
+            ?? accounts[0].accountID
 
-        await loadAccount(accountToLoad)
+        await loadAccount(accountToLoad, restorePersistedSelection: true)
     }
 
-    private func loadAccount(_ accountID: AccountIdentifier) async {
+    private func loadAccount(_ accountID: AccountIdentifier, restorePersistedSelection: Bool) async {
+        resetAccountScopedState()
         selectedAccountID = accountID
         persistSelectedAccountID(accountID)
+        await matrixClient.setActiveAccount(accountID)
+        await refreshKnownRoomDisplayNames(for: accountID)
 
         spaces = await matrixClient.spaceSummaries(for: accountID)
-        if let persistedSpaceID = persistedSelectedSpaceID(for: accountID),
+        if restorePersistedSelection,
+           let persistedSpaceID = persistedSelectedSpaceID(for: accountID),
            spaces.contains(where: { $0.spaceID == persistedSpaceID }) {
             selectedSpaceID = persistedSpaceID
         } else {
@@ -329,7 +442,15 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         }
 
         selectedRoomID = persistedSelectedRoomID(for: accountID)
-        selectedSettingsDestination = persistedSelectedSettingsDestination(for: accountID)
+        if restorePersistedSelection {
+            selectedSettingsDestination = pendingPreferredSettingsDestination
+                ?? persistedSelectedSettingsDestination(for: accountID)
+        } else {
+            selectedSettingsDestination = pendingPreferredSettingsDestination
+            persistSelectedSettingsDestination(selectedSettingsDestination, for: accountID)
+        }
+        pendingPreferredAccountID = nil
+        pendingPreferredSettingsDestination = nil
         selectedRoomDetails = nil
 
         notify(sidebarObservers)
@@ -360,36 +481,71 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         roomListTask = Task { [weak self] in
             guard let self else { return }
             for await roomSnapshot in stream {
+                let updatedSpaces = await self.matrixClient.spaceSummaries(for: selectedAccountID)
+                let knownSummaries = await self.matrixClient.allKnownRoomSummaries(for: selectedAccountID)
+                let spaceAssignedRoomIDs = Set(updatedSpaces.flatMap(\.roomIDs)).union(
+                    knownSummaries.compactMap { summary in
+                        summary.spaceIDs.isEmpty ? nil : summary.roomID
+                    }
+                )
+                let effectiveRoomSnapshot: [RoomSummary]
+                if self.selectedSpaceID == nil {
+                    effectiveRoomSnapshot = roomSnapshot.filter { !spaceAssignedRoomIDs.contains($0.roomID) }
+                } else {
+                    effectiveRoomSnapshot = roomSnapshot
+                }
                 let shouldSubscribeToTimeline = await MainActor.run { () -> Bool in
                     let previousSelectedRoomID = self.selectedRoomID
-                    self.rooms = roomSnapshot
-                    for room in roomSnapshot {
+                    let previousSpaces = self.spaces
+                    let previousSelectedSpaceID = self.selectedSpaceID
+                    self.rooms = effectiveRoomSnapshot
+                    self.spaces = updatedSpaces
+                    if let selectedSpaceID = self.selectedSpaceID,
+                       !updatedSpaces.contains(where: { $0.spaceID == selectedSpaceID }) {
+                        self.selectedSpaceID = nil
+                        self.persistSelectedSpaceID(nil, for: selectedAccountID)
+                    }
+                    for room in knownSummaries {
                         self.knownRoomDisplayNames[room.roomID] = room.displayName
                     }
 
                     let persistedRoomID = self.persistedSelectedRoomID(for: selectedAccountID)
                     if let current = self.selectedRoomID,
-                       roomSnapshot.contains(where: { $0.roomID == current }) {
+                       effectiveRoomSnapshot.contains(where: { $0.roomID == current }) {
                         self.selectedRoomID = current
                     } else if let persistedRoomID,
-                              roomSnapshot.contains(where: { $0.roomID == persistedRoomID }) {
+                              effectiveRoomSnapshot.contains(where: { $0.roomID == persistedRoomID }) {
                         self.selectedRoomID = persistedRoomID
                     } else {
-                        self.selectedRoomID = roomSnapshot.first?.roomID
+                        self.selectedRoomID = effectiveRoomSnapshot.first?.roomID
                     }
 
                     self.persistSelectedRoomID(self.selectedRoomID, for: selectedAccountID)
+                    if self.spaces != previousSpaces {
+                        self.notify(self.sidebarObservers)
+                    }
                     self.notify(self.roomListObservers)
-                    if self.selectedRoomID != previousSelectedRoomID {
+                    if self.selectedRoomID != previousSelectedRoomID || self.selectedSpaceID != previousSelectedSpaceID {
                         self.notify(self.selectionObservers)
                     }
-                    return self.selectedRoomID != previousSelectedRoomID || self.timelineTask == nil
+                    return self.selectedRoomID != previousSelectedRoomID ||
+                        self.selectedSpaceID != previousSelectedSpaceID ||
+                        self.timelineTask == nil
                 }
                 await self.loadRoomDetails()
                 if shouldSubscribeToTimeline {
                     await self.subscribeToTimeline()
                 }
             }
+        }
+    }
+
+    private func refreshKnownRoomDisplayNames(for accountID: AccountIdentifier) async {
+        let summaries = await matrixClient.allKnownRoomSummaries(for: accountID)
+        await MainActor.run {
+            self.knownRoomDisplayNames = Dictionary(
+                uniqueKeysWithValues: summaries.map { ($0.roomID, $0.displayName) }
+            )
         }
     }
 
@@ -505,6 +661,33 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         notify(selectionObservers)
     }
 
+    private func resetAccountScopedState() {
+        roomListTask?.cancel()
+        timelineTask?.cancel()
+        mediaTask?.cancel()
+        verificationTask?.cancel()
+        workerTask?.cancel()
+
+        spaces = []
+        rooms = []
+        timelineItems = []
+        mediaStates = [:]
+        mediaWorkerSnapshots = []
+        verificationSnapshot = .initial
+        selectedSpaceID = nil
+        selectedRoomID = nil
+        selectedSettingsDestination = nil
+        selectedRoomDetails = nil
+        knownRoomDisplayNames = [:]
+
+        notify(sidebarObservers)
+        notify(roomListObservers)
+        notify(timelineObservers)
+        notify(mediaObservers)
+        notify(inspectorObservers)
+        notify(selectionObservers)
+    }
+
     private func persistedSelectedAccountID() -> AccountIdentifier? {
         guard let value = defaults.string(forKey: DefaultsKey.selectedAccountID), !value.isEmpty else { return nil }
         return AccountIdentifier(rawValue: value)
@@ -566,6 +749,15 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
             defaults.set(destination.rawValue, forKey: key)
         } else {
             defaults.removeObject(forKey: key)
+        }
+    }
+
+    private func clearPersistedSelectionState(for accountID: AccountIdentifier) {
+        defaults.removeObject(forKey: DefaultsKey.selectedSpacePrefix + accountID.rawValue)
+        defaults.removeObject(forKey: DefaultsKey.selectedRoomPrefix + accountID.rawValue)
+        defaults.removeObject(forKey: DefaultsKey.selectedSettingsPrefix + accountID.rawValue)
+        if persistedSelectedAccountID() == accountID {
+            defaults.removeObject(forKey: DefaultsKey.selectedAccountID)
         }
     }
 

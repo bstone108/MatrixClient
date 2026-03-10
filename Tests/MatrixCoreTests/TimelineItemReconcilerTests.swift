@@ -140,6 +140,40 @@ func authoritativeRemoteEchoWinsIfLocalEchoArrivesLater() {
 }
 
 @Test
+func pendingOwnMessageIsUpgradedWhenRemoteEchoDiffersSlightly() {
+    let timestamp = Date()
+    let localEcho = TimelineItem(
+        id: "local-echo",
+        roomID: RoomIdentifier(rawValue: "!room:test"),
+        senderID: "@me:test",
+        senderDisplayName: "Me",
+        body: "hello  ",
+        timestamp: timestamp,
+        isOwnMessage: true,
+        isEncrypted: true,
+        deliveryState: .sending,
+        transactionID: EventTransactionIdentifier(rawValue: "txn-1")
+    )
+    let remote = TimelineItem(
+        id: "$event:test",
+        roomID: RoomIdentifier(rawValue: "!room:test"),
+        senderID: "@me:test",
+        senderDisplayName: "Me",
+        body: "hello",
+        timestamp: timestamp.addingTimeInterval(2),
+        isOwnMessage: true,
+        isEncrypted: true,
+        deliveryState: .accepted
+    )
+
+    let repaired = TimelineItemReconciler.repairedPendingRemoteEchoes(in: [localEcho, remote])
+
+    #expect(repaired.count == 1)
+    #expect(repaired[0].id == "$event:test")
+    #expect(repaired[0].deliveryState == .accepted)
+}
+
+@Test
 func normalizedReadReceiptsKeepOnlyLatestMessagePerReader() {
     let roomID = RoomIdentifier(rawValue: "!room:test")
     let oldItem = TimelineItem(

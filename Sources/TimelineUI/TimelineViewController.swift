@@ -654,6 +654,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private let scrollView = NSScrollView(frame: .zero)
     private let composerScrollView = NSScrollView(frame: .zero)
     private let composerTextView = NSTextView(frame: .zero)
+    private let sendButton = NSButton(title: "Send", target: nil, action: nil)
     private var composerHeightConstraint: NSLayoutConstraint?
     private var scrollObserver: NSObjectProtocol?
     private var pendingReadMarkTask: Task<Void, Never>?
@@ -706,7 +707,8 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         composerScrollView.autohidesScrollers = true
         composerScrollView.borderType = .bezelBorder
 
-        let sendButton = NSButton(title: "Send", target: self, action: #selector(sendCurrentDraft))
+        sendButton.target = self
+        sendButton.action = #selector(sendCurrentDraft)
         sendButton.keyEquivalent = "\r"
 
         let composerRow = NSStackView(views: [composerScrollView, sendButton])
@@ -837,6 +839,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     @objc
     private func sendCurrentDraft() {
+        guard state.selectedRoomSummary?.membership == .joined else { return }
         let body = composerTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
         state.sendMessage(body)
@@ -845,7 +848,18 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func reloadSelection() {
-        titleField.stringValue = state.selectedRoomSummary?.displayName ?? "No Room Selected"
+        if let summary = state.selectedRoomSummary {
+            if summary.membership == .notJoined {
+                titleField.stringValue = "\(summary.displayName)  •  Not Joined"
+            } else if summary.membership == .invited {
+                titleField.stringValue = "\(summary.displayName)  •  Invited"
+            } else {
+                titleField.stringValue = summary.displayName
+            }
+        } else {
+            titleField.stringValue = "No Room Selected"
+        }
+        updateComposerAvailability()
     }
 
     private func reloadTimeline() {
@@ -922,6 +936,20 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     public func textDidChange(_ notification: Notification) {
         guard notification.object as AnyObject? === composerTextView else { return }
         updateComposerHeight()
+    }
+
+    private func updateComposerAvailability() {
+        let isJoinedRoom = state.selectedRoomSummary?.membership == .joined
+        composerTextView.isEditable = isJoinedRoom
+        composerTextView.isSelectable = isJoinedRoom
+        composerScrollView.alphaValue = isJoinedRoom ? 1.0 : 0.65
+        sendButton.isEnabled = isJoinedRoom
+        composerTextView.toolTip = isJoinedRoom ? nil : "Join this room before sending messages."
+
+        if !isJoinedRoom && !composerTextView.string.isEmpty {
+            composerTextView.string = ""
+            updateComposerHeight()
+        }
     }
 
     public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

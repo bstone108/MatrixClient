@@ -20,6 +20,10 @@ final class MainWindowController: NSWindowController {
     private lazy var loginViewController = LoginViewController(state: state)
     private var inspectorItem: NSSplitViewItem?
     private var toolbarController: NSToolbar?
+    private var frameStabilizationTask: Task<Void, Never>?
+    private var isApplyingManagedFrame = false
+    private var isRestoringInitialFrame = true
+    private var userAdjustedWindowFrame = false
 
     init(state: WorkspaceStateController, videoPlaybackEngine: any VideoPlaybackEngine) {
         self.state = state
@@ -41,6 +45,7 @@ final class MainWindowController: NSWindowController {
         buildWorkspaceUI()
         updatePresentation()
         restoreWindowFrameIfNeeded(centerIfReset: false)
+        scheduleWindowFrameStabilization(preferPersistedFrame: true, centerIfNeeded: false)
     }
 
     required init?(coder: NSCoder) {
@@ -53,10 +58,12 @@ final class MainWindowController: NSWindowController {
     }
 
     func showAndFocusWindow() {
+        isRestoringInitialFrame = true
         restoreWindowFrameIfNeeded(centerIfReset: true)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         window?.orderFrontRegardless()
+        scheduleWindowFrameStabilization(preferPersistedFrame: true, centerIfNeeded: false)
     }
 
     @objc
@@ -78,6 +85,10 @@ final class MainWindowController: NSWindowController {
                 }
             }
         }
+    }
+
+    func persistWindowFrame() {
+        saveWindowFrame()
     }
 
     private func buildWorkspaceUI() {
@@ -129,11 +140,11 @@ final class MainWindowController: NSWindowController {
     }
 
     private func restorePersistedWindowFrame() {
-        guard let window else { return }
+        guard window != nil else { return }
         if let storedFrame = persistedWindowFrame() {
-            window.setFrame(sanitizedFrame(for: storedFrame, centerIfNeeded: false), display: false)
+            applyManagedFrame(sanitizedFrame(for: storedFrame, centerIfNeeded: false), display: false)
         } else {
-            window.setFrame(defaultWindowFrame(centered: true), display: false)
+            applyManagedFrame(defaultWindowFrame(centered: true), display: false)
         }
     }
 
@@ -148,7 +159,41 @@ final class MainWindowController: NSWindowController {
         guard !hasUsableSize || !isOnScreen else { return }
 
         let fallbackFrame = persistedWindowFrame() ?? defaultWindowFrame(centered: centerIfReset)
-        window.setFrame(sanitizedFrame(for: fallbackFrame, centerIfNeeded: centerIfReset), display: false)
+        applyManagedFrame(sanitizedFrame(for: fallbackFrame, centerIfNeeded: centerIfReset), display: false)
+    }
+
+    private func scheduleWindowFrameStabilization(preferPersistedFrame: Bool, centerIfNeeded: Bool) {
+        frameStabilizationTask?.cancel()
+        frameStabilizationTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            self?.stabilizeWindowFrame(preferPersistedFrame: preferPersistedFrame, centerIfNeeded: centerIfNeeded)
+            try? await Task.sleep(for: .milliseconds(150))
+            self?.stabilizeWindowFrame(preferPersistedFrame: false, centerIfNeeded: centerIfNeeded)
+            self?.isRestoringInitialFrame = false
+            self?.saveWindowFrame()
+        }
+    }
+
+    private func stabilizeWindowFrame(preferPersistedFrame: Bool, centerIfNeeded: Bool) {
+        guard let window else { return }
+
+        let baseFrame: NSRect
+        if let persisted = persistedWindowFrame(), (preferPersistedFrame || !userAdjustedWindowFrame) {
+            baseFrame = persisted
+        } else if window.frame.width >= WindowMetrics.collapsedThreshold.width,
+                  window.frame.height >= WindowMetrics.collapsedThreshold.height {
+            baseFrame = window.frame
+        } else if let persisted = persistedWindowFrame() {
+            baseFrame = persisted
+        } else {
+            baseFrame = defaultWindowFrame(centered: centerIfNeeded)
+        }
+
+        let targetFrame = sanitizedFrame(for: baseFrame, centerIfNeeded: centerIfNeeded)
+        if !window.frame.equalTo(targetFrame) {
+            applyManagedFrame(targetFrame, display: window.isVisible)
+        }
+        saveWindowFrame()
     }
 
     private func persistedWindowFrame() -> NSRect? {
@@ -160,9 +205,27 @@ final class MainWindowController: NSWindowController {
 
     private func saveWindowFrame() {
         guard let window else { return }
+        guard !isApplyingManagedFrame else { return }
+        guard !isRestoringInitialFrame else { return }
         guard window.isVisible, !window.isMiniaturized, !window.styleMask.contains(.fullScreen) else { return }
         let frame = sanitizedFrame(for: window.frame, centerIfNeeded: false)
         UserDefaults.standard.set(NSStringFromRect(frame), forKey: WindowPersistence.frameKey)
+    }
+
+    private func applyManagedFrame(_ frame: NSRect, display: Bool) {
+        guard let window else { return }
+        isApplyingManagedFrame = true
+        window.setFrame(frame, display: display)
+        DispatchQueue.main.async { [weak self] in
+            self?.isApplyingManagedFrame = false
+        }
+    }
+
+    private func sanitizeVisibleWindowFrameIfNeeded() {
+        guard let window else { return }
+        let sanitized = sanitizedFrame(for: window.frame, centerIfNeeded: false)
+        guard !window.frame.equalTo(sanitized) else { return }
+        applyManagedFrame(sanitized, display: window.isVisible)
     }
 
     private func defaultWindowFrame(centered: Bool) -> NSRect {
@@ -265,22 +328,40 @@ extension MainWindowController: NSToolbarDelegate {
             window?.toolbar = nil
             window?.title = "Matrix Client"
         }
+        isRestoringInitialFrame = true
         restoreWindowFrameIfNeeded(centerIfReset: true)
+        scheduleWindowFrameStabilization(preferPersistedFrame: true, centerIfNeeded: true)
     }
 }
 
 extension MainWindowController: NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
+        sanitizeVisibleWindowFrameIfNeeded()
+        if !isApplyingManagedFrame, !isRestoringInitialFrame {
+            userAdjustedWindowFrame = true
+        }
         saveWindowFrame()
     }
 
     func windowDidResize(_ notification: Notification) {
+        sanitizeVisibleWindowFrameIfNeeded()
+        if !isApplyingManagedFrame, !isRestoringInitialFrame {
+            userAdjustedWindowFrame = true
+        }
         saveWindowFrame()
     }
 
     func windowDidDeminiaturize(_ notification: Notification) {
         restoreWindowFrameIfNeeded(centerIfReset: false)
         saveWindowFrame()
+    }
+
+    func windowDidBecomeKey(_ notification: Notification) {
+        scheduleWindowFrameStabilization(preferPersistedFrame: false, centerIfNeeded: false)
+    }
+
+    func windowDidChangeScreen(_ notification: Notification) {
+        scheduleWindowFrameStabilization(preferPersistedFrame: false, centerIfNeeded: false)
     }
 }
 

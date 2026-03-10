@@ -32,6 +32,8 @@
 		36BDA37AB4090E44953CE7C7 /* RoomListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD6574C466127BC50BE7442 /* RoomListViewController.swift */; };
 		37BC707C8CBB0767A39CFFF2 /* ReliableSendQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04505453266AAAEE352288CD /* ReliableSendQueue.swift */; };
 		3AEC4E050F48B44AAD2D7BDE /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
+		425DDBD8DCE83C83E0ACFBC4 /* NotificationSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C1341F46C65038F5CE773AB /* NotificationSettingsViewController.swift */; };
+		42C12B6BBE78B0215C6ED516 /* NotificationPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = B759BF06CDD903FC5A6D0EAE /* NotificationPreferences.swift */; };
 		43BD258BFCB28F3BEA3910C0 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60373EDFC0DE3D31903A4FA0 /* main.swift */; };
 		4577B23E6E05E7615BDD790A /* MatrixCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		474D86F34C20934C8C91BE31 /* DiagnosticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D5CA02E1E3E626A1CD38140 /* DiagnosticsService.swift */; };
@@ -56,6 +58,7 @@
 		A3938EAA298B76BDF48DEC42 /* PersistedRoomSummaryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D4A2567C76418A352201302 /* PersistedRoomSummaryRepository.swift */; };
 		AA998F6F95B77FCF48E99B30 /* AppShell.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */; };
 		B1A5708C81B6F71EFAC97573 /* QueuedMessageRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB38A79F3BBDA97B951F6412 /* QueuedMessageRepositoryTests.swift */; };
+		B7D29EED35F029186DBFD6AD /* AccountSettingsViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8DEC7C559CD6644DF684C0C4 /* AccountSettingsViewController.swift */; };
 		B8022498FD0FA60050DB1F1F /* MediaKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2C35C5EED9D40F7789E6D9A9 /* MediaKit.framework */; };
 		B9C1B9B1AFA047287E45260E /* MatrixClientService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B849AB14F50F23462B79F882 /* MatrixClientService.swift */; };
 		BDDFE5441D29A56D9A6F85F3 /* SlidingSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */; };
@@ -70,6 +73,7 @@
 		D705FFE0368A754D1975C9FD /* TimelineItemReconciler.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3DA26EFE66740A1D2D898D8 /* TimelineItemReconciler.swift */; };
 		D7E95FA6C6774733AD1ACF76 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
 		DBF5A34245AB42662B1479B9 /* MatrixCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */; };
+		DFADC1951A7DFFB0B5FF4A43 /* NotificationController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BE2F7BA626C5FBE62057A29 /* NotificationController.swift */; };
 		DFD1723297B94E9E077623C1 /* LiveLoginSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */; };
 		E357D0CDBDD047E680482BA3 /* TimelineItemReconcilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */; };
 		E6A85A2F5E82E2F1519F6EC8 /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */; };
@@ -275,17 +279,21 @@
 		82DDDC54E9C2F1277CA62D7D /* DemoData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoData.swift; sourceTree = "<group>"; };
 		8650C1E422E30485CFDC85B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		881785589AB98D28509F8D58 /* PersistedTimelineRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistedTimelineRepositoryTests.swift; sourceTree = "<group>"; };
+		8BE2F7BA626C5FBE62057A29 /* NotificationController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationController.swift; sourceTree = "<group>"; };
 		8C599DB2C5336D19B28239AB /* SecuritySettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecuritySettingsViewController.swift; sourceTree = "<group>"; };
+		8DEC7C559CD6644DF684C0C4 /* AccountSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSettingsViewController.swift; sourceTree = "<group>"; };
 		902079BA570A51652EED1765 /* MatrixMediaCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixMediaCache.swift; sourceTree = "<group>"; };
 		903044045DB8284FCED08DC5 /* LoginViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewController.swift; sourceTree = "<group>"; };
 		945AC57F18FD237DB624792F /* RailViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RailViewController.swift; sourceTree = "<group>"; };
 		94C2CCF3C3D19C2011D2336C /* TimelineUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = TimelineUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		9936E13035BF77FCFBCFC5D3 /* WorkspaceStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStateController.swift; sourceTree = "<group>"; };
+		9C1341F46C65038F5CE773AB /* NotificationSettingsViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationSettingsViewController.swift; sourceTree = "<group>"; };
 		9E7942585CE1A65AE71243CC /* TimelineViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineViewController.swift; sourceTree = "<group>"; };
 		A3DA26EFE66740A1D2D898D8 /* TimelineItemReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineItemReconciler.swift; sourceTree = "<group>"; };
 		AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlidingSyncCoordinator.swift; sourceTree = "<group>"; };
 		AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLoginSmokeTests.swift; sourceTree = "<group>"; };
 		B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineItemReconcilerTests.swift; sourceTree = "<group>"; };
+		B759BF06CDD903FC5A6D0EAE /* NotificationPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPreferences.swift; sourceTree = "<group>"; };
 		B849AB14F50F23462B79F882 /* MatrixClientService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixClientService.swift; sourceTree = "<group>"; };
 		C20F6E9DCB5F14B793586751 /* ContentHostViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentHostViewController.swift; sourceTree = "<group>"; };
 		C802D7A603B5971793D9F707 /* MatrixLiveSmoke */ = {isa = PBXFileReference; includeInIndex = 0; path = MatrixLiveSmoke; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -531,12 +539,16 @@
 		DB7E6BF7FFC189C3A9C65570 /* AppShell */ = {
 			isa = PBXGroup;
 			children = (
+				8DEC7C559CD6644DF684C0C4 /* AccountSettingsViewController.swift */,
 				508AC0E8E096EC6CF96692D2 /* ApplicationEnvironment.swift */,
 				C20F6E9DCB5F14B793586751 /* ContentHostViewController.swift */,
 				0C43AB1A8B73A14B988327B6 /* InspectorViewController.swift */,
 				903044045DB8284FCED08DC5 /* LoginViewController.swift */,
 				ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */,
 				C86FEB588F4B1D1DBB0DAB40 /* MatrixApplicationDelegate.swift */,
+				8BE2F7BA626C5FBE62057A29 /* NotificationController.swift */,
+				B759BF06CDD903FC5A6D0EAE /* NotificationPreferences.swift */,
+				9C1341F46C65038F5CE773AB /* NotificationSettingsViewController.swift */,
 				945AC57F18FD237DB624792F /* RailViewController.swift */,
 				0AD6574C466127BC50BE7442 /* RoomListViewController.swift */,
 				8C599DB2C5336D19B28239AB /* SecuritySettingsViewController.swift */,
@@ -865,12 +877,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B7D29EED35F029186DBFD6AD /* AccountSettingsViewController.swift in Sources */,
 				8A34F06CA3505054CB940415 /* ApplicationEnvironment.swift in Sources */,
 				2449CD30F19368D1707801F5 /* ContentHostViewController.swift in Sources */,
 				338030CC065BBD7320733D82 /* InspectorViewController.swift in Sources */,
 				CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */,
 				E6A85A2F5E82E2F1519F6EC8 /* MainWindowController.swift in Sources */,
 				2385CBBDCA5CC2359C04778D /* MatrixApplicationDelegate.swift in Sources */,
+				DFADC1951A7DFFB0B5FF4A43 /* NotificationController.swift in Sources */,
+				42C12B6BBE78B0215C6ED516 /* NotificationPreferences.swift in Sources */,
+				425DDBD8DCE83C83E0ACFBC4 /* NotificationSettingsViewController.swift in Sources */,
 				F0F4596135E36AD510E99FCF /* RailViewController.swift in Sources */,
 				36BDA37AB4090E44953CE7C7 /* RoomListViewController.swift in Sources */,
 				F886734E703597B451426981 /* SecuritySettingsViewController.swift in Sources */,

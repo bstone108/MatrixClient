@@ -11,6 +11,7 @@ public actor ReceiptAvatarCache {
     private let client: Client
     private let diagnostics: DiagnosticsService
     private let cacheDirectoryURL: URL
+    private let sdkMediaFetchScopeID: String
     private let fileManager = FileManager.default
 
     private var inFlightTasks: [String: Task<URL?, Never>] = [:]
@@ -19,6 +20,7 @@ public actor ReceiptAvatarCache {
         self.client = client
         self.diagnostics = diagnostics
         self.cacheDirectoryURL = cacheRootURL.appendingPathComponent("ReceiptAvatars", isDirectory: true)
+        self.sdkMediaFetchScopeID = cacheRootURL.standardizedFileURL.path
     }
 
     public func fileURL(for avatarURL: String) async -> URL? {
@@ -67,11 +69,21 @@ public actor ReceiptAvatarCache {
     private func avatarData(for avatarURL: String) async throws -> Data {
         if avatarURL.hasPrefix("mxc://") {
             let mediaSource = mediaSourceFromUrl(url: avatarURL)
-            if let thumbnailData = try? await client.getMediaThumbnail(mediaSource: mediaSource, width: 72, height: 72),
-               !thumbnailData.isEmpty {
+            let thumbnailData = try? await SDKMediaFetchGateCoordinator.shared.withExclusiveFetch(
+                scopeID: sdkMediaFetchScopeID,
+                priority: .avatar
+            ) {
+                try await self.client.getMediaThumbnail(mediaSource: mediaSource, width: 72, height: 72)
+            }
+            if let thumbnailData, !thumbnailData.isEmpty {
                 return thumbnailData
             }
-            return try await client.getMediaContent(mediaSource: mediaSource)
+            return try await SDKMediaFetchGateCoordinator.shared.withExclusiveFetch(
+                scopeID: sdkMediaFetchScopeID,
+                priority: .avatar
+            ) {
+                try await self.client.getMediaContent(mediaSource: mediaSource)
+            }
         }
 
         guard let remoteURL = URL(string: avatarURL) else {

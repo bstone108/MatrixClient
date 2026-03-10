@@ -8,6 +8,9 @@ final class RoomListCellView: NSTableCellView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.cornerRadius = 10
+        layer?.masksToBounds = true
         titleField.font = .systemFont(ofSize: 13, weight: .semibold)
         previewField.font = .systemFont(ofSize: 11)
         previewField.textColor = .secondaryLabelColor
@@ -40,9 +43,44 @@ final class RoomListCellView: NSTableCellView {
         previewField.stringValue = roomListPreview(for: room)
         badgeField.stringValue = room.unreadCount > 0 ? String(room.unreadCount) : ""
         titleField.font = .systemFont(ofSize: 13, weight: selected ? .bold : .semibold)
+        titleField.textColor = room.membership == .notJoined ? .systemRed : .labelColor
+
+        if room.membership == .notJoined {
+            previewField.textColor = .systemRed.withAlphaComponent(0.85)
+            if selected {
+                layer?.backgroundColor = NSColor.clear.cgColor
+                layer?.borderWidth = 0
+                layer?.borderColor = NSColor.clear.cgColor
+            } else {
+                layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.10).cgColor
+                layer?.borderWidth = 1
+                layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.22).cgColor
+            }
+        } else if room.membership == .invited {
+            previewField.textColor = .systemOrange
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderWidth = 0
+            layer?.borderColor = NSColor.clear.cgColor
+        } else {
+            previewField.textColor = .secondaryLabelColor
+            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.borderWidth = 0
+            layer?.borderColor = NSColor.clear.cgColor
+        }
     }
 
     private func roomListPreview(for room: RoomSummary) -> String {
+        switch room.membership {
+        case .notJoined:
+            return room.topic.isEmpty ? "Not joined" : "Not joined  •  \(room.topic)"
+        case .invited:
+            return room.topic.isEmpty ? "Invited" : "Invited  •  \(room.topic)"
+        case .left:
+            return room.topic.isEmpty ? "Left room" : "Left room  •  \(room.topic)"
+        case .joined:
+            break
+        }
+
         if room.lastMessagePreview.isEmpty {
             return room.topic.isEmpty ? "No messages yet" : room.topic
         }

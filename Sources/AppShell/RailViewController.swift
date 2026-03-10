@@ -39,6 +39,11 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
         SidebarSection(kind: .spaces),
         SidebarSection(kind: .settings)
     ]
+    private let settingsDestinations: [WorkspaceSettingsDestination] = [
+        .accounts,
+        .notifications,
+        .securityVerification
+    ]
     private var isApplyingSelection = false
 
     init(state: WorkspaceStateController) {
@@ -95,9 +100,9 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
             case .accounts:
                 return state.accounts.count
             case .spaces:
-                return state.spaces.count + 1
+                return state.spaces.count
             case .settings:
-                return 1
+                return settingsDestinations.count
             }
         default:
             return 0
@@ -113,12 +118,9 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
             case .accounts:
                 return SidebarAccountNode(summary: state.accounts[index])
             case .spaces:
-                if index == 0 {
-                    return SidebarSpaceNode(summary: allRoomsSummary())
-                }
-                return SidebarSpaceNode(summary: state.spaces[index - 1])
+                return SidebarSpaceNode(summary: state.spaces[index])
             case .settings:
-                return SidebarSettingsNode(destination: .securityVerification)
+                return SidebarSettingsNode(destination: settingsDestinations[index])
             }
         default:
             return NSObject()
@@ -163,14 +165,15 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
                 cell.textField?.stringValue = "Settings"
             }
         case let account as SidebarAccountNode:
-            let isSelected = state.selectedAccountID == account.summary.accountID && state.selectedSettingsDestination == nil && state.selectedSpaceID == nil
-            cell.textField?.font = .systemFont(ofSize: 13, weight: isSelected ? .semibold : .regular)
+            let isActive = state.selectedAccountID == account.summary.accountID &&
+                state.selectedSpaceID == nil &&
+                state.selectedSettingsDestination == nil
+            cell.textField?.font = .systemFont(ofSize: 13, weight: isActive ? .semibold : .regular)
             cell.textField?.textColor = .labelColor
             cell.textField?.stringValue = account.summary.displayName
         case let space as SidebarSpaceNode:
-            let isAllRooms = space.summary.spaceID.rawValue == "__all__"
             let selected = state.selectedSettingsDestination == nil &&
-                ((isAllRooms && state.selectedSpaceID == nil) || state.selectedSpaceID == space.summary.spaceID)
+                state.selectedSpaceID == space.summary.spaceID
             cell.textField?.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .regular)
             cell.textField?.textColor = .labelColor
             cell.textField?.stringValue = space.summary.displayName
@@ -191,16 +194,13 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
         guard outlineView.selectedRow >= 0 else { return }
         let item = outlineView.item(atRow: outlineView.selectedRow)
         if let account = item as? SidebarAccountNode {
-            guard state.selectedAccountID != account.summary.accountID else { return }
+            guard state.selectedAccountID != account.summary.accountID ||
+                    state.selectedSpaceID != nil ||
+                    state.selectedSettingsDestination != nil else { return }
             state.selectAccount(account.summary.accountID)
         } else if let space = item as? SidebarSpaceNode {
-            if space.summary.spaceID.rawValue == "__all__" {
-                guard state.selectedSpaceID != nil || state.selectedSettingsDestination != nil else { return }
-                state.selectSpace(nil)
-            } else {
-                guard state.selectedSpaceID != space.summary.spaceID || state.selectedSettingsDestination != nil else { return }
-                state.selectSpace(space.summary.spaceID)
-            }
+            guard state.selectedSpaceID != space.summary.spaceID || state.selectedSettingsDestination != nil else { return }
+            state.selectSpace(space.summary.spaceID)
         } else if let settings = item as? SidebarSettingsNode {
             state.selectSettings(settings.destination)
         }
@@ -213,9 +213,10 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
         let targetRow: Int?
         if let selectedSettingsDestination = state.selectedSettingsDestination {
             targetRow = rowForSettings(selectedSettingsDestination)
+        } else if let selectedSpaceID = state.selectedSpaceID {
+            targetRow = rowForSpace(selectedSpaceID)
         } else {
-            let selectedSpaceID = state.selectedSpaceID ?? SpaceIdentifier(rawValue: "__all__")
-            targetRow = rowForSpace(selectedSpaceID) ?? state.selectedAccountID.flatMap(rowForAccount)
+            targetRow = state.selectedAccountID.flatMap(rowForAccount)
         }
 
         guard let targetRow else { return }
@@ -237,9 +238,8 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
 
     private func rowForSpace(_ spaceID: SpaceIdentifier) -> Int? {
         let spacesSection = sections[1]
-        let allSpaces = [allRoomsSummary()] + state.spaces
 
-        for index in allSpaces.indices where allSpaces[index].spaceID == spaceID {
+        for index in state.spaces.indices where state.spaces[index].spaceID == spaceID {
             let item = outlineView.child(index, ofItem: spacesSection)
             let row = outlineView.row(forItem: item)
             return row >= 0 ? row : nil
@@ -249,18 +249,13 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
 
     private func rowForSettings(_ destination: WorkspaceSettingsDestination) -> Int? {
         let settingsSection = sections[2]
-        let item = outlineView.child(0, ofItem: settingsSection)
-        guard let node = item as? SidebarSettingsNode, node.destination == destination else { return nil }
-        let row = outlineView.row(forItem: item)
-        return row >= 0 ? row : nil
+        for index in settingsDestinations.indices {
+            let item = outlineView.child(index, ofItem: settingsSection)
+            guard let node = item as? SidebarSettingsNode, node.destination == destination else { continue }
+            let row = outlineView.row(forItem: item)
+            return row >= 0 ? row : nil
+        }
+        return nil
     }
 
-    private func allRoomsSummary() -> SpaceSummary {
-        SpaceSummary(
-            spaceID: SpaceIdentifier(rawValue: "__all__"),
-            displayName: "All Rooms",
-            unreadCount: 0,
-            roomIDs: []
-        )
-    }
 }

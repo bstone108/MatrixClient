@@ -5,6 +5,7 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
     private var environment: ApplicationEnvironment?
     private var stateController: WorkspaceStateController?
     private var mainWindowController: MainWindowController?
+    private var notificationController: NotificationController?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -18,6 +19,13 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
             self.environment = environment
             self.stateController = stateController
 
+            let notificationController = NotificationController(
+                matrixClient: environment.matrixClient,
+                state: stateController,
+                diagnostics: environment.diagnostics
+            )
+            self.notificationController = notificationController
+
             let controller = MainWindowController(
                 state: stateController,
                 videoPlaybackEngine: environment.videoPlaybackEngine
@@ -27,6 +35,7 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
             buildMenu()
             controller.showAndFocusWindow()
             NSApp.activate(ignoringOtherApps: true)
+            notificationController.start()
             stateController.bootstrap()
         } catch {
             let alert = NSAlert(error: error)
@@ -37,6 +46,10 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
+    }
+
+    public func applicationWillTerminate(_ notification: Notification) {
+        mainWindowController?.persistWindowFrame()
     }
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

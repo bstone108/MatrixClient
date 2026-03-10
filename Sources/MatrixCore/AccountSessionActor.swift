@@ -175,10 +175,40 @@ private struct ReadMarkerOverride: Sendable {
     let appliedAt: Date
 }
 
+private struct SpaceHierarchyResponse: Decodable {
+    let rooms: [SpaceHierarchyRoom]
+    let nextBatch: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case rooms
+        case nextBatch = "next_batch"
+    }
+}
+
+private struct SpaceHierarchyRoom: Decodable, Sendable {
+    let roomID: String
+    let name: String?
+    let topic: String?
+    let canonicalAlias: String?
+    let roomType: String?
+    let worldReadable: Bool?
+    let joinRule: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case roomID = "room_id"
+        case name
+        case topic
+        case canonicalAlias = "canonical_alias"
+        case roomType = "room_type"
+        case worldReadable = "world_readable"
+        case joinRule = "join_rule"
+    }
+}
+
 public actor AccountSessionActor {
     private enum Constants {
         static let backgroundSweepInterval: Duration = .seconds(30)
-        static let backgroundRoomTimelineLimit = 500
+        static let backgroundRoomTimelineLimit = 64
         static let activeRoomTimelineLimit = 500
         static let backgroundSubscriptionBatchSize = 64
         static let mediaRetentionMessageLimit = 500
@@ -194,6 +224,7 @@ public actor AccountSessionActor {
     private let receiptAvatarCache: ReceiptAvatarCache
     private let timelineRepository: PersistedTimelineRepository
     private let roomSummaryRepository: PersistedRoomSummaryRepository
+    private let notificationBroadcaster = AsyncBroadcaster<RoomNotificationEvent>()
     private let verificationBroadcaster = AsyncBroadcaster<VerificationSnapshot>()
 
     private var syncService: SyncService?
@@ -207,14 +238,20 @@ public actor AccountSessionActor {
     private var roomItemsByID: [RoomIdentifier: RoomListItem] = [:]
     private var timelineSubscriptions: [RoomIdentifier: TimelineSubscription] = [:]
     private var roomInfoSubscriptions: [RoomIdentifier: RoomInfoSubscription] = [:]
-    private var rawTimelineItemsByRoom: [RoomIdentifier: [TimelineItem]] = [:]
+    private var sdkTimelineItemsByRoom: [RoomIdentifier: [TimelineItem]] = [:]
+    private var displayTimelineItemsByRoom: [RoomIdentifier: [TimelineItem]] = [:]
     private var roomMemberProfilesByRoom: [RoomIdentifier: [String: RoomMemberProfile]] = [:]
     private var roomDetailsCache: [RoomIdentifier: RoomDetails] = [:]
+    private var discoveredSpaceIDsByRoom: [RoomIdentifier: Set<SpaceIdentifier>] = [:]
     private var backgroundSubscribedRoomIDs: Set<RoomIdentifier> = []
     private var restoredTimelineRoomIDs: Set<RoomIdentifier> = []
+    private var notificationPrimedRoomIDs: Set<RoomIdentifier> = []
+    private var lastSeenNotificationEventIDByRoom: [RoomIdentifier: String] = [:]
     private var lastMarkedReadEventIDByRoom: [RoomIdentifier: String] = [:]
     private var readMarkerOverridesByRoom: [RoomIdentifier: ReadMarkerOverride] = [:]
     private var backgroundRoomSweepTask: Task<Void, Never>?
+    private var pendingSendMonitorTasks: [RoomIdentifier: Task<Void, Never>] = [:]
+    private var lastSpaceHierarchyRefreshAt: Date?
     private var verificationController: SessionVerificationController?
     private var verificationControllerDelegate: VerificationControllerDelegateProxy?
     private var verificationStateListener: VerificationStateListenerProxy?
@@ -375,6 +412,7 @@ public actor AccountSessionActor {
             listener: syncIndicatorListener
         )
 
+        await ensureDiscoveredSpaceSummariesExist()
         await client.enableAllSendQueues(enable: true)
         await syncService.start()
         await setupVerification()
@@ -387,6 +425,10 @@ public actor AccountSessionActor {
 
     public func spaces() async -> [SpaceSummary] {
         await slidingSync.spaceSummaries()
+    }
+
+    public func allKnownRoomSummaries() async -> [RoomSummary] {
+        await slidingSync.allKnownRoomSummaries()
     }
 
     public func roomListStream(spaceID: SpaceIdentifier?) async -> AsyncStream<[RoomSummary]> {
@@ -417,6 +459,10 @@ public actor AccountSessionActor {
 
     public func mediaWorkerStateStream() async -> AsyncStream<[MediaDownloadWorkerSnapshot]> {
         await mediaCache.workerStateStream()
+    }
+
+    public func notificationEventStream() -> AsyncStream<RoomNotificationEvent> {
+        notificationBroadcaster.stream()
     }
 
     public func verificationStateStream() -> AsyncStream<VerificationSnapshot> {
@@ -513,6 +559,11 @@ public actor AccountSessionActor {
         return details
     }
 
+    public func joinRoom(_ roomID: RoomIdentifier) async throws {
+        _ = try await client.joinRoomById(roomId: roomID.rawValue)
+        await performBackgroundRoomSweep(reason: "manual-join", forceResubscribe: true)
+    }
+
     public func sendMessage(_ body: String, roomID: RoomIdentifier) async throws {
         try await ensureTimelineSubscription(for: roomID)
         guard let subscription = timelineSubscriptions[roomID] else {
@@ -526,6 +577,7 @@ public actor AccountSessionActor {
         Task.detached(priority: .userInitiated) {
             do {
                 _ = try await timeline.send(msg: content)
+                await self.schedulePendingSendMonitor(for: roomID)
             } catch {
                 await diagnostics.record(.error, category: "Timeline", message: "Failed to enqueue message", metadata: [
                     "roomID": roomIDValue,
@@ -573,6 +625,85 @@ public actor AccountSessionActor {
 
     public func queueDiagnostics() async -> [SendQueueSnapshot] {
         []
+    }
+
+    public func setForeground(_ isForeground: Bool) async {
+        await mediaCache.setSessionForeground(isForeground)
+    }
+
+    public func shutdown(logoutRemote: Bool) async {
+        backgroundRoomSweepTask?.cancel()
+        backgroundRoomSweepTask = nil
+
+        roomListHandle?.cancel()
+        roomListHandle = nil
+        roomListListener = nil
+
+        roomListSyncIndicatorHandle?.cancel()
+        roomListSyncIndicatorHandle = nil
+        roomListSyncIndicatorListener = nil
+
+        verificationStateHandle?.cancel()
+        verificationStateHandle = nil
+        verificationStateListener = nil
+        verificationControllerDelegate = nil
+        verificationController = nil
+
+        for task in pendingSendMonitorTasks.values {
+            task.cancel()
+        }
+        pendingSendMonitorTasks.removeAll()
+
+        for subscription in timelineSubscriptions.values {
+            subscription.handle.cancel()
+            subscription.room.enableSendQueue(enable: false)
+        }
+        timelineSubscriptions.removeAll()
+
+        for subscription in roomInfoSubscriptions.values {
+            subscription.handle.cancel()
+        }
+        roomInfoSubscriptions.removeAll()
+
+        roomItems.removeAll()
+        roomItemsByID.removeAll()
+        sdkTimelineItemsByRoom.removeAll()
+        displayTimelineItemsByRoom.removeAll()
+        roomDetailsCache.removeAll()
+        roomMemberProfilesByRoom.removeAll()
+        backgroundSubscribedRoomIDs.removeAll()
+        notificationPrimedRoomIDs.removeAll()
+        lastSeenNotificationEventIDByRoom.removeAll()
+        lastMarkedReadEventIDByRoom.removeAll()
+        readMarkerOverridesByRoom.removeAll()
+
+        await client.enableAllSendQueues(enable: false)
+
+        if let syncService {
+            do {
+                try await syncService.stop()
+            } catch {
+                await diagnostics.record(.error, category: "Sync", message: "Failed to stop Sliding Sync service during shutdown", metadata: [
+                    "accountID": summary.accountID.rawValue,
+                    "error": error.localizedDescription
+                ])
+            }
+            self.syncService = nil
+        }
+
+        roomListService = nil
+        roomList = nil
+
+        guard logoutRemote else { return }
+
+        do {
+            _ = try await client.logout()
+        } catch {
+            await diagnostics.record(.error, category: "Auth", message: "Remote logout failed", metadata: [
+                "accountID": summary.accountID.rawValue,
+                "error": error.localizedDescription
+            ])
+        }
     }
 
     private func setupVerification() async {
@@ -740,6 +871,12 @@ public actor AccountSessionActor {
 
     private func handleRoomListUpdates(_ updates: [RoomListEntriesUpdate]) async {
         applyRoomListUpdates(updates)
+        let persistedSpaceAssignmentsExist = !discoveredSpaceIDsByRoom.isEmpty
+        let knownSpaces = await slidingSync.spaceSummaries()
+        let hasKnownSpaces = persistedSpaceAssignmentsExist || !knownSpaces.isEmpty
+        if hasKnownSpaces {
+            await refreshSpaceHierarchyIfNeeded(force: true)
+        }
         await restorePersistedTimelinesIfNeeded(for: Array(roomItemsByID.keys))
         await subscribeToBackgroundRoomsIfNeeded(
             roomIDs: Array(roomItemsByID.keys),
@@ -839,66 +976,77 @@ public actor AccountSessionActor {
         let timeline = try await room.timeline()
         let listener = TimelineListenerProxy { [weak self] diff in
             Task {
-                await self?.handleTimelineDiff(diff, roomID: roomID, room: room)
+                await self?.handleTimelineDiff(diff, roomID: roomID, room: room, timeline: timeline)
             }
         }
         let handle = await timeline.addListener(listener: listener)
         timelineSubscriptions[roomID] = TimelineSubscription(room: room, timeline: timeline, listener: listener, handle: handle)
     }
 
-    private func handleTimelineDiff(_ diffs: [MatrixRustSDK.TimelineDiff], roomID: RoomIdentifier, room: Room) async {
-        var current = rawTimelineItemsByRoom[roomID, default: []]
+    private func handleTimelineDiff(
+        _ diffs: [MatrixRustSDK.TimelineDiff],
+        roomID: RoomIdentifier,
+        room: Room,
+        timeline: Timeline
+    ) async {
+        var sdkItems = sdkTimelineItemsByRoom[roomID, default: []]
+        let previousItems = displayTimelineItemsByRoom[roomID, default: []]
 
         for diff in diffs {
             switch diff.change() {
             case .append:
                 let incoming = await convert(items: diff.append() ?? [], roomID: roomID, room: room)
-                current.append(contentsOf: mergeIncomingTimelineItems(incoming, existingItems: current))
+                sdkItems.append(contentsOf: mergeIncomingTimelineItems(incoming, existingItems: sdkItems))
             case .clear:
-                current.removeAll()
+                sdkItems.removeAll()
             case .insert:
                 if let insert = diff.insert(), let item = await convert(item: insert.item, roomID: roomID, room: room) {
-                    let merged = mergeIncomingTimelineItem(item, existingItems: current)
-                    current.insert(merged, at: min(Int(insert.index), current.count))
+                    let merged = mergeIncomingTimelineItem(item, existingItems: sdkItems)
+                    sdkItems.insert(merged, at: min(Int(insert.index), sdkItems.count))
                 }
             case .set:
                 if let set = diff.set(),
-                   current.indices.contains(Int(set.index)),
+                   sdkItems.indices.contains(Int(set.index)),
                    let item = await convert(item: set.item, roomID: roomID, room: room) {
-                    current[Int(set.index)] = mergeIncomingTimelineItem(item, existingItems: current)
+                    sdkItems[Int(set.index)] = mergeIncomingTimelineItem(item, existingItems: sdkItems)
                 }
             case .remove:
-                if let index = diff.remove(), current.indices.contains(Int(index)) {
-                    current.remove(at: Int(index))
+                if let index = diff.remove(), sdkItems.indices.contains(Int(index)) {
+                    sdkItems.remove(at: Int(index))
                 }
             case .pushBack:
                 if let item = diff.pushBack(), let converted = await convert(item: item, roomID: roomID, room: room) {
-                    current.append(mergeIncomingTimelineItem(converted, existingItems: current))
+                    sdkItems.append(mergeIncomingTimelineItem(converted, existingItems: sdkItems))
                 }
             case .pushFront:
                 if let item = diff.pushFront(), let converted = await convert(item: item, roomID: roomID, room: room) {
-                    current.insert(mergeIncomingTimelineItem(converted, existingItems: current), at: 0)
+                    sdkItems.insert(mergeIncomingTimelineItem(converted, existingItems: sdkItems), at: 0)
                 }
             case .popBack:
-                _ = current.popLast()
+                _ = sdkItems.popLast()
             case .popFront:
-                if !current.isEmpty {
-                    current.removeFirst()
+                if !sdkItems.isEmpty {
+                    sdkItems.removeFirst()
                 }
             case .truncate:
                 if let length = diff.truncate() {
-                    current = Array(current.prefix(Int(length)))
+                    sdkItems = Array(sdkItems.prefix(Int(length)))
                 }
             case .reset:
                 let incoming = await convert(items: diff.reset() ?? [], roomID: roomID, room: room)
-                current = mergeIncomingTimelineItems(incoming, existingItems: current)
+                sdkItems = mergeResetTimelineItems(incoming, existingItems: sdkItems)
             }
         }
 
-        current = TimelineItemReconciler.deduplicated(current)
-        current = retainedTimelineItems(from: current)
-        current = TimelineItemReconciler.normalizedReadReceipts(in: current)
-        rawTimelineItemsByRoom[roomID] = current
+        let resolvedSDKItems = await refreshPendingDeliveryStates(
+            in: sdkItems,
+            roomID: roomID,
+            room: room,
+            timeline: timeline
+        )
+        sdkTimelineItemsByRoom[roomID] = resolvedSDKItems
+        let current = derivedDisplayTimeline(from: resolvedSDKItems)
+        displayTimelineItemsByRoom[roomID] = current
         await prefetchMediaIfNeeded(from: current)
         let retainedMediaItems = current.filter { $0.media != nil }
         await mediaCache.prune(
@@ -911,10 +1059,28 @@ public actor AccountSessionActor {
             await slidingSync.updateRoomSummary(summary)
             await persistCurrentRoomSummarySnapshot()
         }
+        if let notification = await makeRoomNotificationEvent(
+            roomID: roomID,
+            room: room,
+            previousItems: previousItems,
+            currentItems: current
+        ) {
+            notificationBroadcaster.yield(notification)
+        }
+        if current.contains(where: requiresPendingDeliveryMonitoring(_:)) {
+            schedulePendingSendMonitor(for: roomID)
+        }
     }
 
     private func mergeIncomingTimelineItems(_ incomingItems: [TimelineItem], existingItems: [TimelineItem]) -> [TimelineItem] {
         incomingItems.map { mergeIncomingTimelineItem($0, existingItems: existingItems) }
+    }
+
+    private func mergeResetTimelineItems(_ incomingItems: [TimelineItem], existingItems: [TimelineItem]) -> [TimelineItem] {
+        guard !existingItems.isEmpty else {
+            return incomingItems
+        }
+        return existingItems + mergeIncomingTimelineItems(incomingItems, existingItems: existingItems)
     }
 
     private func mergeIncomingTimelineItem(_ incomingItem: TimelineItem, existingItems: [TimelineItem]) -> TimelineItem {
@@ -923,6 +1089,298 @@ public actor AccountSessionActor {
 
     private func retainedTimelineItems(from items: [TimelineItem]) -> [TimelineItem] {
         Array(items.suffix(Constants.mediaRetentionMessageLimit))
+    }
+
+    private func derivedDisplayTimeline(
+        from sdkItems: [TimelineItem]
+    ) -> [TimelineItem] {
+        var current = sdkItems
+        current = TimelineItemReconciler.deduplicated(current)
+        current = TimelineItemReconciler.repairedPendingRemoteEchoes(in: current)
+        current = retainedTimelineItems(from: current)
+        current = TimelineItemReconciler.normalizedReadReceipts(in: current)
+        return current
+    }
+
+    private func schedulePendingSendMonitor(for roomID: RoomIdentifier) {
+        pendingSendMonitorTasks[roomID]?.cancel()
+        guard timelineSubscriptions[roomID] != nil else { return }
+
+        pendingSendMonitorTasks[roomID] = Task { [self, roomID] in
+            await monitorPendingSendState(for: roomID)
+        }
+    }
+
+    private func monitorPendingSendState(for roomID: RoomIdentifier) async {
+        defer {
+            pendingSendMonitorTasks.removeValue(forKey: roomID)
+        }
+
+        for _ in 0..<80 {
+            if Task.isCancelled {
+                return
+            }
+
+            guard let subscription = timelineSubscriptions[roomID] else {
+                return
+            }
+
+            let current = displayTimelineItemsByRoom[roomID, default: []]
+            let hasPending = current.contains(where: requiresPendingDeliveryMonitoring(_:))
+            guard hasPending else { return }
+
+            let refreshed = await refreshPendingDeliveryStates(
+                in: current,
+                roomID: roomID,
+                room: subscription.room,
+                timeline: subscription.timeline
+            )
+
+            if refreshed != current {
+                await publishResolvedTimelineState(refreshed, roomID: roomID)
+            }
+
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+    }
+
+    private func refreshPendingDeliveryStates(
+        in items: [TimelineItem],
+        roomID: RoomIdentifier,
+        room: Room,
+        timeline: Timeline
+    ) async -> [TimelineItem] {
+        guard !items.isEmpty else { return items }
+
+        var updated = items
+        var changed = false
+
+        for index in updated.indices {
+            let item = updated[index]
+            guard item.kind == .message,
+                  item.isOwnMessage,
+                  requiresPendingDeliveryMonitoring(item) else {
+                continue
+            }
+
+            guard let refreshed = await refreshedPendingTimelineItem(
+                from: item,
+                roomID: roomID,
+                items: items,
+                room: room,
+                timeline: timeline
+            ) else {
+                continue
+            }
+
+            guard refreshed != item else { continue }
+            updated[index] = refreshed
+            changed = true
+        }
+
+        return changed ? updated : items
+    }
+
+    private func refreshedPendingTimelineItem(
+        from item: TimelineItem,
+        roomID: RoomIdentifier,
+        items: [TimelineItem],
+        room: Room,
+        timeline: Timeline
+    ) async -> TimelineItem? {
+        let refreshedFromTimeline: EventTimelineItem?
+        if let transactionID = item.transactionID {
+            refreshedFromTimeline = try? await timeline.getEventTimelineItemByTransactionId(transactionId: transactionID.rawValue)
+        } else {
+            refreshedFromTimeline = nil
+        }
+        let eventID = refreshedFromTimeline?.eventId()
+        let rawReceipts = refreshedFromTimeline?.readReceipts() ?? [:]
+        let receipts: ReceiptSummary
+        if !rawReceipts.isEmpty {
+            receipts = await mapReceipts(rawReceipts, roomID: roomID, room: room)
+        } else {
+            receipts = item.receipts
+        }
+
+        var deliveryState = MessageDeliveryState.reconciled(
+            mappedState: mapDeliveryState(refreshedFromTimeline?.localSendState()),
+            isOwnMessage: true,
+            eventID: eventID,
+            hasReadReceipts: !receipts.readReceipts.isEmpty
+        )
+
+        var resolvedEventID = eventID
+        if resolvedEventID == nil || deliveryState == .queued || deliveryState == .sending {
+            if let heuristicEventID = await latestRemoteEchoFallback(for: item, roomID: roomID, items: items) {
+                resolvedEventID = heuristicEventID
+                deliveryState = MessageDeliveryState.reconciled(
+                    mappedState: .accepted,
+                    isOwnMessage: true,
+                    eventID: heuristicEventID,
+                    hasReadReceipts: !receipts.readReceipts.isEmpty
+                )
+            }
+        }
+
+        guard resolvedEventID != nil || deliveryState != item.deliveryState || receipts != item.receipts else {
+            return nil
+        }
+
+        return TimelineItem(
+            id: resolvedEventID ?? item.id,
+            roomID: item.roomID,
+            senderID: item.senderID,
+            senderDisplayName: item.senderDisplayName,
+            body: item.body,
+            timestamp: item.timestamp,
+            kind: item.kind,
+            media: item.media,
+            status: item.status,
+            isOwnMessage: item.isOwnMessage,
+            isEncrypted: item.isEncrypted,
+            isEdited: item.isEdited,
+            replyPreview: item.replyPreview,
+            threadReplyCount: item.threadReplyCount,
+            deliveryState: deliveryState,
+            receipts: receipts,
+            transactionID: item.transactionID,
+            isDeleted: item.isDeleted,
+            deletedAt: item.deletedAt
+        )
+    }
+
+    private func requiresPendingDeliveryMonitoring(_ item: TimelineItem) -> Bool {
+        guard item.kind == .message, item.isOwnMessage else {
+            return false
+        }
+
+        switch item.deliveryState {
+        case .queued, .sending:
+            return !item.id.hasPrefix("$")
+        case .accepted, .echoed, .permanentFailure, .none:
+            return false
+        }
+    }
+
+    private func latestRemoteEchoFallback(
+        for item: TimelineItem,
+        roomID: RoomIdentifier,
+        items: [TimelineItem]
+    ) async -> String? {
+        if let localMatch = matchingRemoteEcho(for: item, in: items) {
+            return localMatch.id
+        }
+
+        if let sdkMatch = matchingRemoteEcho(for: item, in: sdkTimelineItemsByRoom[roomID, default: []]) {
+            return sdkMatch.id
+        }
+
+        if let displayMatch = matchingRemoteEcho(for: item, in: displayTimelineItemsByRoom[roomID, default: []]) {
+            return displayMatch.id
+        }
+
+        guard let latestEvent = await roomItemsByID[roomID]?.latestEvent(),
+              latestEvent.sender() == summary.userID,
+              let eventID = latestEvent.eventId() else {
+            return nil
+        }
+
+        let latestTimestamp = Date(timeIntervalSince1970: Double(latestEvent.timestamp()) / 1_000)
+        guard abs(latestTimestamp.timeIntervalSince(item.timestamp)) <= 600 else {
+            return nil
+        }
+
+        let candidateBody = normalizedTimelineBody(messagePreview(for: latestEvent))
+        let pendingBody = normalizedTimelineBody(item.body)
+        guard !candidateBody.isEmpty, candidateBody == pendingBody else {
+            return nil
+        }
+
+        return eventID
+    }
+
+    private func matchingRemoteEcho(for pendingItem: TimelineItem, in items: [TimelineItem]) -> TimelineItem? {
+        items.reversed().first { candidate in
+            candidate.kind == .message &&
+                candidate.isOwnMessage &&
+                candidate.id.hasPrefix("$") &&
+                candidate.roomID == pendingItem.roomID &&
+                candidate.senderID == pendingItem.senderID &&
+                abs(candidate.timestamp.timeIntervalSince(pendingItem.timestamp)) <= 600 &&
+                normalizedTimelineBody(candidate.body) == normalizedTimelineBody(pendingItem.body) &&
+                mediaSignature(for: candidate) == mediaSignature(for: pendingItem)
+        }
+    }
+
+    private func normalizedTimelineBody(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\r\n", with: "\n")
+    }
+
+    private func mediaSignature(for item: TimelineItem) -> String {
+        item.media.map {
+            "\($0.kind.rawValue)|\($0.sourceURL)|\($0.thumbnailSourceURL ?? "")|\($0.filename ?? "")"
+        } ?? ""
+    }
+
+    private func publishResolvedTimelineState(_ items: [TimelineItem], roomID: RoomIdentifier) async {
+        let retained = TimelineItemReconciler.normalizedReadReceipts(
+            in: retainedTimelineItems(
+                from: TimelineItemReconciler.repairedPendingRemoteEchoes(
+                    in: TimelineItemReconciler.deduplicated(items)
+                )
+            )
+        )
+        sdkTimelineItemsByRoom[roomID] = synchronizedSDKTimelineItems(
+            existing: sdkTimelineItemsByRoom[roomID, default: []],
+            resolved: retained
+        )
+        displayTimelineItemsByRoom[roomID] = retained
+        await persistTimelineSnapshot(retained, roomID: roomID)
+        await timelineStore.replace(items: compactStatusItems(retained), for: roomID)
+    }
+
+    private func synchronizedSDKTimelineItems(existing: [TimelineItem], resolved: [TimelineItem]) -> [TimelineItem] {
+        guard !existing.isEmpty, !resolved.isEmpty else { return existing }
+
+        let resolvedByID = Dictionary(uniqueKeysWithValues: resolved.map { ($0.id, $0) })
+        let resolvedByTransactionID = Dictionary(
+            uniqueKeysWithValues: resolved.compactMap { item in
+                item.transactionID.map { ($0, item) }
+            }
+        )
+
+        return existing.map { item in
+            if let resolvedItem = resolvedByID[item.id]
+                ?? item.transactionID.flatMap({ resolvedByTransactionID[$0] })
+                ?? matchingRemoteEcho(for: item, in: resolved) {
+                return TimelineItem(
+                    id: resolvedItem.id.hasPrefix("$") ? resolvedItem.id : item.id,
+                    roomID: item.roomID,
+                    senderID: item.senderID,
+                    senderDisplayName: item.senderDisplayName,
+                    body: item.body,
+                    timestamp: item.timestamp,
+                    kind: item.kind,
+                    media: item.media,
+                    status: item.status,
+                    isOwnMessage: item.isOwnMessage,
+                    isEncrypted: item.isEncrypted,
+                    isEdited: item.isEdited || resolvedItem.isEdited,
+                    replyPreview: item.replyPreview ?? resolvedItem.replyPreview,
+                    threadReplyCount: max(item.threadReplyCount, resolvedItem.threadReplyCount),
+                    deliveryState: resolvedItem.deliveryState ?? item.deliveryState,
+                    receipts: resolvedItem.receipts.readReceipts.isEmpty ? item.receipts : resolvedItem.receipts,
+                    transactionID: item.transactionID ?? resolvedItem.transactionID,
+                    isDeleted: item.isDeleted || resolvedItem.isDeleted,
+                    deletedAt: resolvedItem.deletedAt ?? item.deletedAt
+                )
+            }
+
+            return item
+        }
     }
 
     private func restorePersistedTimelinesIfNeeded(for roomIDs: [RoomIdentifier]) async {
@@ -941,7 +1399,8 @@ public actor AccountSessionActor {
                 let retainedItems = TimelineItemReconciler.normalizedReadReceipts(
                     in: retainedTimelineItems(from: TimelineItemReconciler.deduplicated(decodedItems))
                 )
-                rawTimelineItemsByRoom[roomID] = retainedItems
+                displayTimelineItemsByRoom[roomID] = retainedItems
+                primeNotificationBaseline(for: roomID, items: retainedItems)
                 await prefetchMediaIfNeeded(from: retainedItems)
                 await mediaCache.prune(
                     roomID: roomID,
@@ -1004,7 +1463,14 @@ public actor AccountSessionActor {
                 .sorted { $0.timestamp > $1.timestamp }
             guard !summaries.isEmpty else { return [] }
 
+            discoveredSpaceIDsByRoom = Dictionary(
+                uniqueKeysWithValues: summaries.compactMap { summary in
+                    guard !summary.spaceIDs.isEmpty else { return nil }
+                    return (summary.roomID, Set(summary.spaceIDs))
+                }
+            )
             await slidingSync.replace(spaces: [], rooms: summaries)
+            await ensureDiscoveredSpaceSummariesExist()
             return summaries.map(\.roomID)
         } catch {
             await diagnostics.record(.error, category: "Persistence", message: "Failed to restore cached room summaries", metadata: [
@@ -1016,7 +1482,7 @@ public actor AccountSessionActor {
     }
 
     private func persistCurrentRoomSummarySnapshot() async {
-        let summaries = await slidingSync.roomSummaries(spaceID: nil)
+        let summaries = await slidingSync.allKnownRoomSummaries()
         guard !summaries.isEmpty else { return }
 
         let payloads = summaries.compactMap { summary -> PersistedRoomSummaryPayload? in
@@ -1039,10 +1505,7 @@ public actor AccountSessionActor {
     private func buildRoomSummary(from roomItem: RoomListItem) async -> RoomSummary? {
         let roomID = RoomIdentifier(rawValue: roomItem.id())
         let roomInfo = try? await roomItem.roomInfo()
-        if roomInfo?.isSpace == true {
-            return nil
-        }
-
+        let isSpaceRoom = roomInfo?.isSpace ?? false
         let latestEvent = await roomItem.latestEvent()
         let topic = roomInfo?.topic ?? ""
         var notificationCount = roomInfo.map { Int(max($0.notificationCount, $0.numUnreadMessages)) } ?? 0
@@ -1050,15 +1513,17 @@ public actor AccountSessionActor {
         let isDirect = roomInfo?.isDirect ?? roomItem.isDirect()
         let displayName = roomInfo?.displayName ?? roomItem.displayName() ?? roomItem.canonicalAlias() ?? roomID.rawValue
         let cachedLatest = latestTimelineItem(for: roomID)
-        let preview = cachedLatest.map(roomPreviewText(for:)) ?? latestEvent.flatMap { event in
-            messagePreview(for: event)
-        } ?? topic
+        let fallbackPreview = isSpaceRoom ? (topic.isEmpty ? "Space" : topic) : topic
+        let preview = cachedLatest.map(roomPreviewText(for:)) ??
+            latestEvent.flatMap { event in messagePreview(for: event) } ??
+            fallbackPreview
         let timestamp = cachedLatest?.timestamp
             ?? latestEvent.map { Date(timeIntervalSince1970: Double($0.timestamp()) / 1_000) }
             ?? .distantPast
         let lastSenderDisplayName = cachedLatest?.senderDisplayName ?? latestEvent.map { senderDisplayName(forEvent: $0) } ?? displayName
         let isEncrypted = await roomItem.isEncrypted()
         let latestEventID = latestEvent?.eventId()
+        let membership = mapRoomMembership(roomInfo?.membership ?? roomItem.membership())
 
         if let override = readMarkerOverridesByRoom[roomID] {
             if notificationCount == 0 && highlightCount == 0 {
@@ -1081,17 +1546,546 @@ public actor AccountSessionActor {
             highlightCount: highlightCount,
             isDirect: isDirect,
             isEncrypted: isEncrypted,
-            lastSenderDisplayName: lastSenderDisplayName
+            lastSenderDisplayName: lastSenderDisplayName,
+            canonicalAlias: roomInfo?.canonicalAlias ?? roomItem.canonicalAlias(),
+            roomKind: isSpaceRoom ? .space : .room,
+            membership: membership,
+            spaceIDs: currentSpaceIDs(for: roomID),
+            isPublic: roomInfo?.isPublic ?? false,
+            canJoin: membership != .joined && membership != .left
         )
     }
 
+    private func currentSpaceIDs(for roomID: RoomIdentifier) -> [SpaceIdentifier] {
+        Array(discoveredSpaceIDsByRoom[roomID, default: []]).sorted { $0.rawValue < $1.rawValue }
+    }
+
+    private func ensureDiscoveredSpaceSummariesExist() async {
+        let discoveredSpaceIDs = Set(discoveredSpaceIDsByRoom.values.flatMap { $0 })
+        guard !discoveredSpaceIDs.isEmpty else { return }
+
+        let knownRoomSummaries = await slidingSync.allKnownRoomSummaries()
+        let knownSpaceIDs = Set(
+            knownRoomSummaries
+                .filter(\.isSpace)
+                .map { SpaceIdentifier(rawValue: $0.roomID.rawValue) }
+        )
+
+        var inserted = false
+        for spaceID in discoveredSpaceIDs.subtracting(knownSpaceIDs) {
+            guard let summary = await buildSpaceSummary(spaceID: spaceID) else { continue }
+            await slidingSync.updateRoomSummary(summary)
+            inserted = true
+        }
+
+        if inserted {
+            await persistCurrentRoomSummarySnapshot()
+        }
+    }
+
+    private func refreshSpaceHierarchyIfNeeded(force: Bool) async {
+        let now = Date()
+        let minimumRefreshInterval: TimeInterval = force ? 15 : 120
+        if let lastSpaceHierarchyRefreshAt,
+           now.timeIntervalSince(lastSpaceHierarchyRefreshAt) < minimumRefreshInterval {
+            return
+        }
+
+        let knownSpaces = await slidingSync.allKnownRoomSummaries()
+            .filter(\.isSpace)
+            .map { SpaceIdentifier(rawValue: $0.roomID.rawValue) }
+        let discoveredSpaces = discoveredSpaceIDsByRoom.values.flatMap { $0 }
+        let spaceIDs = Set(knownSpaces).union(discoveredSpaces).sorted { $0.rawValue < $1.rawValue }
+        guard !spaceIDs.isEmpty else { return }
+
+        lastSpaceHierarchyRefreshAt = now
+
+        for spaceID in spaceIDs {
+            await refreshSpaceHierarchy(for: spaceID)
+        }
+    }
+
+    private func refreshSpaceHierarchy(for spaceID: SpaceIdentifier) async {
+        do {
+            let rooms = try await fetchSpaceHierarchyRooms(for: spaceID)
+            await applySpaceHierarchy(spaceID: spaceID, rooms: rooms)
+        } catch {
+            await diagnostics.record(.debug, category: "Spaces", message: "Failed to refresh space hierarchy", metadata: [
+                "spaceID": spaceID.rawValue,
+                "error": error.localizedDescription
+            ])
+        }
+    }
+
+    private func fetchSpaceHierarchyRooms(for spaceID: SpaceIdentifier) async throws -> [SpaceHierarchyRoom] {
+        let session = try client.session()
+        let baseURL = summary.homeserver
+        guard let encodedRoomID = encodedPathComponent(spaceID.rawValue) else {
+            return []
+        }
+
+        let decoder = JSONDecoder()
+        var collectedByRoomID: [String: SpaceHierarchyRoom] = [:]
+        var fromToken: String?
+
+        while true {
+            var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+            components?.path = "/_matrix/client/v1/rooms/\(encodedRoomID)/hierarchy"
+            var queryItems = [
+                URLQueryItem(name: "limit", value: "100"),
+                URLQueryItem(name: "suggested_only", value: "false")
+            ]
+            if let fromToken {
+                queryItems.append(URLQueryItem(name: "from", value: fromToken))
+            }
+            components?.queryItems = queryItems
+
+            guard let url = components?.url else { return Array(collectedByRoomID.values) }
+
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+            request.timeoutInterval = 30
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            if let httpResponse = response as? HTTPURLResponse {
+                guard (200 ... 299).contains(httpResponse.statusCode) else {
+                    throw NSError(
+                        domain: "MatrixClient.SpaceHierarchy",
+                        code: httpResponse.statusCode,
+                        userInfo: [NSLocalizedDescriptionKey: "Hierarchy request failed with status \(httpResponse.statusCode)."]
+                    )
+                }
+            }
+
+            let decoded = try decoder.decode(SpaceHierarchyResponse.self, from: data)
+            for room in decoded.rooms {
+                collectedByRoomID[room.roomID] = room
+            }
+
+            guard let nextBatch = decoded.nextBatch, !nextBatch.isEmpty, nextBatch != fromToken else {
+                break
+            }
+            fromToken = nextBatch
+        }
+
+        return Array(collectedByRoomID.values)
+    }
+
+    private func applySpaceHierarchy(spaceID: SpaceIdentifier, rooms: [SpaceHierarchyRoom]) async {
+        let validRoomIDs = Set(rooms.map(\.roomID))
+        var changed = false
+
+        let previouslyAssignedRoomIDs = discoveredSpaceIDsByRoom.compactMap { roomID, spaceIDs in
+            spaceIDs.contains(spaceID) ? roomID : nil
+        }
+        for roomID in previouslyAssignedRoomIDs where !validRoomIDs.contains(roomID.rawValue) {
+            var memberships = discoveredSpaceIDsByRoom[roomID, default: []]
+            if memberships.remove(spaceID) != nil {
+                discoveredSpaceIDsByRoom[roomID] = memberships
+                await updateSpaceAssignments(for: roomID)
+                changed = true
+            }
+        }
+
+        for hierarchyRoom in rooms {
+            let roomID = RoomIdentifier(rawValue: hierarchyRoom.roomID)
+            var memberships = discoveredSpaceIDsByRoom[roomID, default: []]
+            let inserted = memberships.insert(spaceID).inserted
+            discoveredSpaceIDsByRoom[roomID] = memberships
+
+            if let existingSummary = await slidingSync.roomSummary(for: roomID) {
+                let updatedSummary = RoomSummary(
+                    roomID: existingSummary.roomID,
+                    displayName: existingSummary.displayName,
+                    topic: existingSummary.topic,
+                    lastMessagePreview: existingSummary.lastMessagePreview,
+                    timestamp: existingSummary.timestamp,
+                    unreadCount: existingSummary.unreadCount,
+                    highlightCount: existingSummary.highlightCount,
+                    isDirect: existingSummary.isDirect,
+                    isEncrypted: existingSummary.isEncrypted,
+                    lastSenderDisplayName: existingSummary.lastSenderDisplayName,
+                    canonicalAlias: existingSummary.canonicalAlias,
+                    roomKind: existingSummary.roomKind,
+                    membership: existingSummary.membership,
+                    spaceIDs: currentSpaceIDs(for: roomID),
+                    isPublic: existingSummary.isPublic,
+                    canJoin: existingSummary.canJoin
+                )
+                if updatedSummary != existingSummary {
+                    await slidingSync.updateRoomSummary(updatedSummary)
+                    changed = true
+                } else if inserted {
+                    changed = true
+                }
+            } else {
+                await slidingSync.updateRoomSummary(roomSummary(from: hierarchyRoom, spaceID: spaceID))
+                changed = true
+            }
+        }
+
+        if let spaceSummary = await buildSpaceSummary(spaceID: spaceID) {
+            await slidingSync.updateRoomSummary(spaceSummary)
+            changed = true
+        }
+
+        if changed {
+            await persistCurrentRoomSummarySnapshot()
+        }
+    }
+
+    private func updateSpaceAssignments(for roomID: RoomIdentifier) async {
+        if let existingSummary = await slidingSync.roomSummary(for: roomID) {
+            await slidingSync.updateRoomSummary(
+                RoomSummary(
+                    roomID: existingSummary.roomID,
+                    displayName: existingSummary.displayName,
+                    topic: existingSummary.topic,
+                    lastMessagePreview: existingSummary.lastMessagePreview,
+                    timestamp: existingSummary.timestamp,
+                    unreadCount: existingSummary.unreadCount,
+                    highlightCount: existingSummary.highlightCount,
+                    isDirect: existingSummary.isDirect,
+                    isEncrypted: existingSummary.isEncrypted,
+                    lastSenderDisplayName: existingSummary.lastSenderDisplayName,
+                    canonicalAlias: existingSummary.canonicalAlias,
+                    roomKind: existingSummary.roomKind,
+                    membership: existingSummary.membership,
+                    spaceIDs: currentSpaceIDs(for: roomID),
+                    isPublic: existingSummary.isPublic,
+                    canJoin: existingSummary.canJoin
+                )
+            )
+        }
+    }
+
+    private func roomSummary(from hierarchyRoom: SpaceHierarchyRoom, spaceID _: SpaceIdentifier) -> RoomSummary {
+        let roomID = RoomIdentifier(rawValue: hierarchyRoom.roomID)
+        let membership: RoomMembership
+        if roomItemsByID[roomID] != nil {
+            membership = .joined
+        } else {
+            membership = .notJoined
+        }
+
+        let topic = hierarchyRoom.topic ?? ""
+        let displayName = hierarchyRoom.name ?? hierarchyRoom.canonicalAlias ?? hierarchyRoom.roomID
+        let isPublic = hierarchyRoom.worldReadable == true || hierarchyRoom.joinRule == "public"
+        let roomKind: RoomSummaryKind = hierarchyRoom.roomType == "m.space" ? .space : .room
+
+        return RoomSummary(
+            roomID: roomID,
+            displayName: displayName,
+            topic: topic,
+            lastMessagePreview: topic.isEmpty ? membership.label : topic,
+            timestamp: .distantPast,
+            unreadCount: 0,
+            highlightCount: 0,
+            isDirect: false,
+            isEncrypted: false,
+            lastSenderDisplayName: displayName,
+            canonicalAlias: hierarchyRoom.canonicalAlias,
+            roomKind: roomKind,
+            membership: membership,
+            spaceIDs: currentSpaceIDs(for: roomID),
+            isPublic: isPublic,
+            canJoin: membership != .left && (membership == .joined || isPublic)
+        )
+    }
+
+    private func encodedPathComponent(_ value: String) -> String? {
+        value.addingPercentEncoding(withAllowedCharacters: CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~")))
+    }
+
+    private func mapRoomMembership(_ membership: Membership) -> RoomMembership {
+        switch membership {
+        case .joined:
+            return .joined
+        case .invited:
+            return .invited
+        case .left:
+            return .left
+        }
+    }
+
+    private func registerSpaceMembership(spaceID: SpaceIdentifier, for roomID: RoomIdentifier) async {
+        var spaceIDs = discoveredSpaceIDsByRoom[roomID, default: []]
+        let inserted = spaceIDs.insert(spaceID).inserted
+        discoveredSpaceIDsByRoom[roomID] = spaceIDs
+
+        guard inserted else { return }
+        await ensureDiscoveredSpaceSummariesExist()
+
+        if let existingSummary = await slidingSync.roomSummary(for: roomID) {
+            await slidingSync.updateRoomSummary(
+                RoomSummary(
+                    roomID: existingSummary.roomID,
+                    displayName: existingSummary.displayName,
+                    topic: existingSummary.topic,
+                    lastMessagePreview: existingSummary.lastMessagePreview,
+                    timestamp: existingSummary.timestamp,
+                    unreadCount: existingSummary.unreadCount,
+                    highlightCount: existingSummary.highlightCount,
+                    isDirect: existingSummary.isDirect,
+                    isEncrypted: existingSummary.isEncrypted,
+                    lastSenderDisplayName: existingSummary.lastSenderDisplayName,
+                    canonicalAlias: existingSummary.canonicalAlias,
+                    roomKind: existingSummary.roomKind,
+                    membership: existingSummary.membership,
+                    spaceIDs: currentSpaceIDs(for: roomID),
+                    isPublic: existingSummary.isPublic,
+                    canJoin: existingSummary.canJoin
+                )
+            )
+            await persistCurrentRoomSummarySnapshot()
+            return
+        }
+
+        if let previewSummary = await buildPreviewRoomSummary(roomID: roomID, spaceID: spaceID) {
+            await slidingSync.updateRoomSummary(previewSummary)
+            await persistCurrentRoomSummarySnapshot()
+        }
+    }
+
+    private func buildPreviewRoomSummary(roomID: RoomIdentifier, spaceID: SpaceIdentifier) async -> RoomSummary? {
+        let viaServers = summary.homeserver.host.map { [$0] } ?? []
+        let preview = try? await client.getRoomPreviewFromRoomId(roomId: roomID.rawValue, viaServers: viaServers)
+        let membership: RoomMembership
+        let displayName: String
+        let topic: String
+        let canonicalAlias: String?
+        let isPublic: Bool
+        let canJoin: Bool
+
+        if let preview {
+            if preview.isJoined {
+                membership = .joined
+            } else if preview.isInvited {
+                membership = .invited
+            } else {
+                membership = .notJoined
+            }
+            displayName = preview.name ?? preview.canonicalAlias ?? roomID.rawValue
+            topic = preview.topic ?? ""
+            canonicalAlias = preview.canonicalAlias
+            isPublic = preview.isPublic
+            canJoin = membership != .left && (preview.isInvited || preview.isPublic || preview.canKnock)
+        } else {
+            membership = .notJoined
+            displayName = roomID.rawValue
+            topic = ""
+            canonicalAlias = nil
+            isPublic = false
+            canJoin = true
+        }
+
+        return RoomSummary(
+            roomID: roomID,
+            displayName: displayName,
+            topic: topic,
+            lastMessagePreview: topic.isEmpty ? membership.label : topic,
+            timestamp: .distantPast,
+            unreadCount: 0,
+            highlightCount: 0,
+            isDirect: false,
+            isEncrypted: false,
+            lastSenderDisplayName: "",
+            canonicalAlias: canonicalAlias,
+            roomKind: .room,
+            membership: membership,
+            spaceIDs: currentSpaceIDs(for: roomID),
+            isPublic: isPublic,
+            canJoin: canJoin
+        )
+    }
+
+    private func buildSpaceSummary(spaceID: SpaceIdentifier) async -> RoomSummary? {
+        let roomID = RoomIdentifier(rawValue: spaceID.rawValue)
+
+        if let roomItem = roomItemsByID[roomID] ?? (try? roomListService?.room(roomId: roomID.rawValue)),
+           let built = await buildRoomSummary(from: roomItem) {
+            return RoomSummary(
+                roomID: built.roomID,
+                displayName: built.displayName,
+                topic: built.topic,
+                lastMessagePreview: built.topic.isEmpty ? "Space" : built.topic,
+                timestamp: built.timestamp,
+                unreadCount: built.unreadCount,
+                highlightCount: built.highlightCount,
+                isDirect: false,
+                isEncrypted: built.isEncrypted,
+                lastSenderDisplayName: built.lastSenderDisplayName,
+                canonicalAlias: built.canonicalAlias,
+                roomKind: .space,
+                membership: built.membership,
+                spaceIDs: [],
+                isPublic: built.isPublic,
+                canJoin: built.canJoin
+            )
+        }
+
+        let viaServers = summary.homeserver.host.map { [$0] } ?? []
+        if let preview = try? await client.getRoomPreviewFromRoomId(roomId: roomID.rawValue, viaServers: viaServers) {
+            let membership: RoomMembership
+            if preview.isJoined {
+                membership = .joined
+            } else if preview.isInvited {
+                membership = .invited
+            } else {
+                membership = .notJoined
+            }
+
+            return RoomSummary(
+                roomID: roomID,
+                displayName: preview.name ?? preview.canonicalAlias ?? roomID.rawValue,
+                topic: preview.topic ?? "",
+                lastMessagePreview: (preview.topic ?? "").isEmpty ? "Space" : (preview.topic ?? ""),
+                timestamp: .distantPast,
+                unreadCount: 0,
+                highlightCount: 0,
+                isDirect: false,
+                isEncrypted: false,
+                lastSenderDisplayName: preview.name ?? preview.canonicalAlias ?? roomID.rawValue,
+                canonicalAlias: preview.canonicalAlias,
+                roomKind: .space,
+                membership: membership,
+                spaceIDs: [],
+                isPublic: preview.isPublic,
+                canJoin: membership != .left && (preview.isInvited || preview.isPublic || preview.canKnock)
+            )
+        }
+
+        return RoomSummary(
+            roomID: roomID,
+            displayName: roomID.rawValue,
+            topic: "",
+            lastMessagePreview: "Space",
+            timestamp: .distantPast,
+            unreadCount: 0,
+            highlightCount: 0,
+            isDirect: false,
+            isEncrypted: false,
+            lastSenderDisplayName: roomID.rawValue,
+            canonicalAlias: nil,
+            roomKind: .space,
+            membership: .joined,
+            spaceIDs: [],
+            isPublic: false,
+            canJoin: false
+        )
+    }
+
+    private func updateSpaceRelationshipsIfNeeded(content: TimelineItemContent, roomID: RoomIdentifier) async {
+        guard case let .state(stateKey, otherState) = content.kind() else { return }
+
+        switch otherState {
+        case .spaceParent:
+            await registerSpaceMembership(
+                spaceID: SpaceIdentifier(rawValue: stateKey),
+                for: roomID
+            )
+        case .spaceChild:
+            await registerSpaceMembership(
+                spaceID: SpaceIdentifier(rawValue: roomID.rawValue),
+                for: RoomIdentifier(rawValue: stateKey)
+            )
+        default:
+            break
+        }
+    }
+
     private func latestTimelineItem(for roomID: RoomIdentifier) -> TimelineItem? {
-        rawTimelineItemsByRoom[roomID, default: []]
+        displayTimelineItemsByRoom[roomID, default: []]
             .last(where: { $0.kind == .message || $0.kind == .statusSummary })
     }
 
+    private func primeNotificationBaseline(for roomID: RoomIdentifier, items: [TimelineItem]) {
+        notificationPrimedRoomIDs.insert(roomID)
+        lastSeenNotificationEventIDByRoom[roomID] = latestIncomingRemoteMessage(in: items)?.id
+    }
+
+    private func makeRoomNotificationEvent(
+        roomID: RoomIdentifier,
+        room: Room,
+        previousItems: [TimelineItem],
+        currentItems: [TimelineItem]
+    ) async -> RoomNotificationEvent? {
+        let latestIncomingEventID = latestIncomingRemoteMessage(in: currentItems)?.id
+
+        guard notificationPrimedRoomIDs.contains(roomID) else {
+            notificationPrimedRoomIDs.insert(roomID)
+            lastSeenNotificationEventIDByRoom[roomID] = latestIncomingEventID
+            return nil
+        }
+
+        let previousIDs = Set(previousItems.map(\.id))
+        let lastSeenEventID = lastSeenNotificationEventIDByRoom[roomID]
+        lastSeenNotificationEventIDByRoom[roomID] = latestIncomingEventID
+
+        guard let candidate = currentItems.reversed().first(where: { item in
+            isNotifiableIncomingMessage(item) &&
+                !previousIDs.contains(item.id) &&
+                item.id != lastSeenEventID
+        }) else {
+            return nil
+        }
+
+        guard await shouldDeliverNotification(for: roomID, room: room) else {
+            return nil
+        }
+
+        let roomInfo = try? await room.roomInfo()
+        let slidingSummary = await slidingSync.roomSummary(for: roomID)
+        let roomDisplayName = roomInfo?.displayName
+            ?? roomItemsByID[roomID]?.displayName()
+            ?? slidingSummary?.displayName
+            ?? roomID.rawValue
+        let previewText = candidate.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "New message"
+            : candidate.body
+
+        return RoomNotificationEvent(
+            accountID: summary.accountID,
+            accountDisplayName: summary.displayName,
+            roomID: roomID,
+            roomDisplayName: roomDisplayName,
+            senderID: candidate.senderID,
+            senderDisplayName: candidate.senderDisplayName,
+            eventID: candidate.id,
+            previewText: previewText,
+            timestamp: candidate.timestamp
+        )
+    }
+
+    private func latestIncomingRemoteMessage(in items: [TimelineItem]) -> TimelineItem? {
+        items.last(where: isNotifiableIncomingMessage)
+    }
+
+    private func isNotifiableIncomingMessage(_ item: TimelineItem) -> Bool {
+        item.kind == .message &&
+            !item.isOwnMessage &&
+            item.id.hasPrefix("$") &&
+            !item.isDeleted
+    }
+
+    private func shouldDeliverNotification(for roomID: RoomIdentifier, room: Room) async -> Bool {
+        guard let roomInfo = try? await room.roomInfo() else {
+            return true
+        }
+
+        let effectiveMode = roomInfo.cachedUserDefinedNotificationMode
+        switch effectiveMode {
+        case .mute:
+            return false
+        case .mentionsAndKeywordsOnly:
+            return roomInfo.highlightCount > 0 || roomInfo.numUnreadMentions > 0
+        case .allMessages, .none:
+            return true
+        }
+    }
+
     private func latestRemoteEventID(for roomID: RoomIdentifier) async -> String? {
-        if let cached = rawTimelineItemsByRoom[roomID, default: []]
+        if let cached = displayTimelineItemsByRoom[roomID, default: []]
             .last(where: { $0.id.hasPrefix("$") && $0.kind == .message })?
             .id {
             return cached
@@ -1117,7 +2111,13 @@ public actor AccountSessionActor {
                 highlightCount: 0,
                 isDirect: summary.isDirect,
                 isEncrypted: summary.isEncrypted,
-                lastSenderDisplayName: summary.lastSenderDisplayName
+                lastSenderDisplayName: summary.lastSenderDisplayName,
+                canonicalAlias: summary.canonicalAlias,
+                roomKind: summary.roomKind,
+                membership: summary.membership,
+                spaceIDs: summary.spaceIDs,
+                isPublic: summary.isPublic,
+                canJoin: summary.canJoin
             )
         )
         await persistCurrentRoomSummarySnapshot()
@@ -1171,6 +2171,7 @@ public actor AccountSessionActor {
     private func convert(item: MatrixRustSDK.TimelineItem, roomID: RoomIdentifier, room: Room) async -> TimelineItem? {
         guard let event = item.asEvent() else { return nil }
         let content = event.content()
+        await updateSpaceRelationshipsIfNeeded(content: content, roomID: roomID)
         let message = content.asMessage()
         let status = timelineStatusDetails(for: content)
         let media = message.flatMap(timelineMediaAttachment(for:))
@@ -1699,7 +2700,9 @@ public actor AccountSessionActor {
                 RequiredState(key: "m.room.encryption", value: ""),
                 RequiredState(key: "m.room.name", value: ""),
                 RequiredState(key: "m.room.topic", value: ""),
-                RequiredState(key: "m.room.avatar", value: "")
+                RequiredState(key: "m.room.avatar", value: ""),
+                RequiredState(key: "m.space.parent", value: "*"),
+                RequiredState(key: "m.space.child", value: "*")
             ],
             timelineLimit: UInt32(timelineLimit),
             includeHeroes: true
@@ -1753,7 +2756,7 @@ public actor AccountSessionActor {
             while !Task.isCancelled {
                 try? await Task.sleep(for: Constants.backgroundSweepInterval)
                 guard !Task.isCancelled else { return }
-                await self.performBackgroundRoomSweep(reason: "periodic-sweep", forceResubscribe: true)
+                await self.performBackgroundRoomSweep(reason: "periodic-sweep", forceResubscribe: false)
             }
         }
     }
@@ -1765,6 +2768,7 @@ public actor AccountSessionActor {
             forceResubscribe: forceResubscribe,
             reason: reason
         )
+        await refreshSpaceHierarchyIfNeeded(force: forceResubscribe)
         await publishRoomListSnapshot()
     }
 

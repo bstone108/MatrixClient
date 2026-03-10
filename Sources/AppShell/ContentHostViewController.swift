@@ -6,6 +6,8 @@ final class ContentHostViewController: NSViewController {
     private let state: WorkspaceStateController
     private let videoPlaybackEngine: any VideoPlaybackEngine
     private lazy var timelineViewController = TimelineViewController(state: state, videoPlaybackEngine: videoPlaybackEngine)
+    private lazy var accountSettingsViewController = AccountSettingsViewController(state: state)
+    private lazy var notificationSettingsViewController = NotificationSettingsViewController(state: state)
     private lazy var securitySettingsViewController = SecuritySettingsViewController(state: state)
     private var currentViewController: NSViewController?
 
@@ -34,6 +36,10 @@ final class ContentHostViewController: NSViewController {
     private func updateContent() {
         let nextViewController: NSViewController
         switch state.selectedSettingsDestination {
+        case .accounts:
+            nextViewController = accountSettingsViewController
+        case .notifications:
+            nextViewController = notificationSettingsViewController
         case .securityVerification:
             nextViewController = securitySettingsViewController
         case .none:

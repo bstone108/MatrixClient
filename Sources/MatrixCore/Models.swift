@@ -56,7 +56,72 @@ public struct SpaceSummary: Identifiable, Hashable, Codable, Sendable {
     }
 }
 
+public enum RoomSummaryKind: String, Codable, Hashable, Sendable {
+    case room
+    case space
+}
+
+public enum RoomMembership: String, Codable, Hashable, Sendable {
+    case joined
+    case invited
+    case left
+    case notJoined
+
+    public var listPriority: Int {
+        switch self {
+        case .joined:
+            return 0
+        case .invited:
+            return 1
+        case .notJoined:
+            return 2
+        case .left:
+            return 3
+        }
+    }
+
+    public var label: String {
+        switch self {
+        case .joined:
+            return "Joined"
+        case .invited:
+            return "Invited"
+        case .left:
+            return "Left"
+        case .notJoined:
+            return "Not Joined"
+        }
+    }
+
+    public var isJoined: Bool {
+        self == .joined
+    }
+
+    public var isVisibleInLists: Bool {
+        self != .left
+    }
+}
+
 public struct RoomSummary: Identifiable, Hashable, Codable, Sendable {
+    private enum CodingKeys: String, CodingKey {
+        case roomID
+        case displayName
+        case topic
+        case lastMessagePreview
+        case timestamp
+        case unreadCount
+        case highlightCount
+        case isDirect
+        case isEncrypted
+        case lastSenderDisplayName
+        case canonicalAlias
+        case roomKind
+        case membership
+        case spaceIDs
+        case isPublic
+        case canJoin
+    }
+
     public var id: RoomIdentifier { roomID }
     public let roomID: RoomIdentifier
     public let displayName: String
@@ -68,6 +133,24 @@ public struct RoomSummary: Identifiable, Hashable, Codable, Sendable {
     public let isDirect: Bool
     public let isEncrypted: Bool
     public let lastSenderDisplayName: String
+    public let canonicalAlias: String?
+    public let roomKind: RoomSummaryKind
+    public let membership: RoomMembership
+    public let spaceIDs: [SpaceIdentifier]
+    public let isPublic: Bool
+    public let canJoin: Bool
+
+    public var isSpace: Bool {
+        roomKind == .space
+    }
+
+    public var belongsToSpace: Bool {
+        !spaceIDs.isEmpty
+    }
+
+    public var isJoined: Bool {
+        membership.isJoined
+    }
 
     public init(
         roomID: RoomIdentifier,
@@ -79,7 +162,13 @@ public struct RoomSummary: Identifiable, Hashable, Codable, Sendable {
         highlightCount: Int,
         isDirect: Bool,
         isEncrypted: Bool,
-        lastSenderDisplayName: String
+        lastSenderDisplayName: String,
+        canonicalAlias: String? = nil,
+        roomKind: RoomSummaryKind = .room,
+        membership: RoomMembership = .joined,
+        spaceIDs: [SpaceIdentifier] = [],
+        isPublic: Bool = false,
+        canJoin: Bool = false
     ) {
         self.roomID = roomID
         self.displayName = displayName
@@ -91,14 +180,66 @@ public struct RoomSummary: Identifiable, Hashable, Codable, Sendable {
         self.isDirect = isDirect
         self.isEncrypted = isEncrypted
         self.lastSenderDisplayName = lastSenderDisplayName
+        self.canonicalAlias = canonicalAlias
+        self.roomKind = roomKind
+        self.membership = membership
+        self.spaceIDs = spaceIDs
+        self.isPublic = isPublic
+        self.canJoin = canJoin
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        roomID = try container.decode(RoomIdentifier.self, forKey: .roomID)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        topic = try container.decode(String.self, forKey: .topic)
+        lastMessagePreview = try container.decode(String.self, forKey: .lastMessagePreview)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        unreadCount = try container.decode(Int.self, forKey: .unreadCount)
+        highlightCount = try container.decode(Int.self, forKey: .highlightCount)
+        isDirect = try container.decode(Bool.self, forKey: .isDirect)
+        isEncrypted = try container.decode(Bool.self, forKey: .isEncrypted)
+        lastSenderDisplayName = try container.decode(String.self, forKey: .lastSenderDisplayName)
+        canonicalAlias = try container.decodeIfPresent(String.self, forKey: .canonicalAlias)
+        roomKind = try container.decodeIfPresent(RoomSummaryKind.self, forKey: .roomKind) ?? .room
+        membership = try container.decodeIfPresent(RoomMembership.self, forKey: .membership) ?? .joined
+        spaceIDs = try container.decodeIfPresent([SpaceIdentifier].self, forKey: .spaceIDs) ?? []
+        isPublic = try container.decodeIfPresent(Bool.self, forKey: .isPublic) ?? false
+        canJoin = try container.decodeIfPresent(Bool.self, forKey: .canJoin) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(roomID, forKey: .roomID)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(topic, forKey: .topic)
+        try container.encode(lastMessagePreview, forKey: .lastMessagePreview)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(unreadCount, forKey: .unreadCount)
+        try container.encode(highlightCount, forKey: .highlightCount)
+        try container.encode(isDirect, forKey: .isDirect)
+        try container.encode(isEncrypted, forKey: .isEncrypted)
+        try container.encode(lastSenderDisplayName, forKey: .lastSenderDisplayName)
+        try container.encodeIfPresent(canonicalAlias, forKey: .canonicalAlias)
+        try container.encode(roomKind, forKey: .roomKind)
+        try container.encode(membership, forKey: .membership)
+        try container.encode(spaceIDs, forKey: .spaceIDs)
+        try container.encode(isPublic, forKey: .isPublic)
+        try container.encode(canJoin, forKey: .canJoin)
     }
 }
 
 public enum WorkspaceSettingsDestination: String, Codable, Sendable {
+    case accounts
+    case notifications
     case securityVerification
 
     public var title: String {
         switch self {
+        case .accounts:
+            return "Accounts"
+        case .notifications:
+            return "Notifications"
         case .securityVerification:
             return "Security / Verification"
         }
@@ -108,6 +249,7 @@ public enum WorkspaceSettingsDestination: String, Codable, Sendable {
 public enum MediaDownloadWorkerKind: String, Codable, Sendable {
     case thumbnail
     case original
+    case recovery
 
     public var title: String {
         switch self {
@@ -115,6 +257,8 @@ public enum MediaDownloadWorkerKind: String, Codable, Sendable {
             return "Thumb"
         case .original:
             return "Orig"
+        case .recovery:
+            return "Fail"
         }
     }
 }
@@ -179,19 +323,28 @@ public enum MessageDeliveryState: String, Codable, Sendable {
             return .echoed
         }
 
+        let hasServerEventID = isOwnMessage && (eventID?.hasPrefix("$") == true)
+        if hasServerEventID {
+            switch mappedState {
+            case .echoed:
+                return .echoed
+            case .permanentFailure:
+                return .accepted
+            case .accepted, .sending, .queued, .none:
+                return .accepted
+            }
+        }
+
         switch mappedState {
         case .accepted, .echoed, .sending:
             return mappedState
         case .permanentFailure:
-            if isOwnMessage, let eventID, eventID.hasPrefix("$") {
-                return .accepted
-            }
             return .permanentFailure
         case .queued, .none:
             break
         }
 
-        guard isOwnMessage, let eventID, eventID.hasPrefix("$") else {
+        guard hasServerEventID else {
             return mappedState
         }
         return .accepted
@@ -438,6 +591,44 @@ public struct TimelineItem: Identifiable, Hashable, Codable, Sendable {
         self.transactionID = transactionID
         self.isDeleted = isDeleted
         self.deletedAt = deletedAt
+    }
+}
+
+public struct RoomNotificationEvent: Identifiable, Hashable, Codable, Sendable {
+    public let accountID: AccountIdentifier
+    public let accountDisplayName: String
+    public let roomID: RoomIdentifier
+    public let roomDisplayName: String
+    public let senderID: String
+    public let senderDisplayName: String
+    public let eventID: String
+    public let previewText: String
+    public let timestamp: Date
+
+    public var id: String {
+        "\(accountID.rawValue)|\(roomID.rawValue)|\(eventID)"
+    }
+
+    public init(
+        accountID: AccountIdentifier,
+        accountDisplayName: String,
+        roomID: RoomIdentifier,
+        roomDisplayName: String,
+        senderID: String,
+        senderDisplayName: String,
+        eventID: String,
+        previewText: String,
+        timestamp: Date
+    ) {
+        self.accountID = accountID
+        self.accountDisplayName = accountDisplayName
+        self.roomID = roomID
+        self.roomDisplayName = roomDisplayName
+        self.senderID = senderID
+        self.senderDisplayName = senderDisplayName
+        self.eventID = eventID
+        self.previewText = previewText
+        self.timestamp = timestamp
     }
 }
 

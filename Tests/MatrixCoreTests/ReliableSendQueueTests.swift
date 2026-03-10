@@ -20,6 +20,18 @@ private actor FlakyTransport: SendQueueTransport {
     }
 }
 
+private actor FetchOrderRecorder {
+    private var values: [SDKMediaFetchPriority] = []
+
+    func append(_ value: SDKMediaFetchPriority) {
+        values.append(value)
+    }
+
+    func snapshot() -> [SDKMediaFetchPriority] {
+        values
+    }
+}
+
 @Test
 func reliableSendQueueRetriesTransientErrorsWithoutPermanentFailure() async throws {
     let diagnostics = DiagnosticsService(subsystem: "test.queue")
@@ -117,6 +129,30 @@ func thumbnailDownloadPolicyLetsBackgroundBorrowWhenActiveRoomHasNoBacklog() {
 }
 
 @Test
+func originalRegularReservedPolicyKeepsBackgroundOutWhileActiveRoomIsBusy() {
+    let decision = MediaDownloadSchedulingPolicy.nextPendingDecision(
+        activeRoomID: "!active:test",
+        pendingRoomIDs: ["!other:test"],
+        runningRoomIDs: ["!active:test"],
+        policy: .originalRegularReserved
+    )
+
+    #expect(decision == nil)
+}
+
+@Test
+func originalHelperPolicyStillLetsBackgroundBorrowWhenRecoveryLaneIsFree() {
+    let decision = MediaDownloadSchedulingPolicy.nextPendingDecision(
+        activeRoomID: "!active:test",
+        pendingRoomIDs: ["!other:test"],
+        runningRoomIDs: ["!active:test", "!active:test"],
+        policy: .originals
+    )
+
+    #expect(decision == MediaDownloadSchedulingDecision(pendingIndex: 0, lane: .background))
+}
+
+@Test
 func mediaCandidateURLsStayPinnedToHomeserverOrigin() {
     let homeserver = URL(string: "https://matrix.example.com")!
     let urls = MatrixMediaCache.mediaCandidateURLs(
@@ -137,4 +173,34 @@ func sanitizedHomeserverBaseURLDropsCredentialsAndQuery() {
     )
 
     #expect(sanitized?.absoluteString == "https://matrix.example.com")
+}
+
+@Test
+func sdkMediaFetchGatePrioritizesThumbnailsBeforeAvatarsAndOriginals() async throws {
+    let gate = SDKMediaFetchGateCoordinator()
+    let recorder = FetchOrderRecorder()
+
+    async let occupyingFetch: Void = gate.withExclusiveFetch(scopeID: "scope", priority: .original) {
+        try await Task.sleep(for: .milliseconds(100))
+    }
+
+    try await Task.sleep(for: .milliseconds(10))
+
+    async let originalFetch: Void = gate.withExclusiveFetch(scopeID: "scope", priority: .original) {
+        await recorder.append(.original)
+    }
+    async let avatarFetch: Void = gate.withExclusiveFetch(scopeID: "scope", priority: .avatar) {
+        await recorder.append(.avatar)
+    }
+    async let thumbnailFetch: Void = gate.withExclusiveFetch(scopeID: "scope", priority: .thumbnail) {
+        await recorder.append(.thumbnail)
+    }
+
+    _ = try await occupyingFetch
+    _ = try await originalFetch
+    _ = try await avatarFetch
+    _ = try await thumbnailFetch
+
+    let snapshot = await recorder.snapshot()
+    #expect(snapshot == [.thumbnail, .avatar, .original])
 }

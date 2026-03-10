@@ -74,6 +74,31 @@ enum TimelineItemReconciler {
         }
     }
 
+    static func repairedPendingRemoteEchoes(in items: [TimelineItem]) -> [TimelineItem] {
+        guard !items.isEmpty else { return [] }
+
+        var mergedIndices: Set<Int> = []
+        var result = items
+
+        for localIndex in result.indices {
+            let localItem = result[localIndex]
+            guard isLocallyPendingOwnMessage(localItem) else { continue }
+            guard let remoteIndex = matchingRemoteEchoIndex(for: localItem, in: result, excluding: mergedIndices) else {
+                continue
+            }
+
+            let remoteItem = result[remoteIndex]
+            result[localIndex] = merged(existing: localItem, incoming: remoteItem)
+            mergedIndices.insert(remoteIndex)
+        }
+
+        guard !mergedIndices.isEmpty else { return result }
+
+        return result.enumerated().compactMap { index, item in
+            mergedIndices.contains(index) ? nil : item
+        }
+    }
+
     private static func matchingExistingItem(for item: TimelineItem, in items: [TimelineItem]) -> TimelineItem? {
         if let transactionID = item.transactionID,
            let match = items.last(where: { $0.transactionID == transactionID }) {
@@ -107,6 +132,13 @@ enum TimelineItemReconciler {
         item.kind == .message && item.isOwnMessage
     }
 
+    private static func isLocallyPendingOwnMessage(_ item: TimelineItem) -> Bool {
+        item.kind == .message &&
+            item.isOwnMessage &&
+            !item.id.hasPrefix("$") &&
+            (item.deliveryState == .queued || item.deliveryState == .sending)
+    }
+
     private static func shouldHeuristicallyMerge(existing: TimelineItem, incoming: TimelineItem) -> Bool {
         guard existing.kind == .message,
               incoming.kind == .message,
@@ -138,6 +170,69 @@ enum TimelineItemReconciler {
         case .accepted:
             return false
         }
+    }
+
+    private static func matchingRemoteEchoIndex(
+        for localItem: TimelineItem,
+        in items: [TimelineItem],
+        excluding mergedIndices: Set<Int>
+    ) -> Int? {
+        var bestIndex: Int?
+        var bestScore = Int.min
+
+        for index in items.indices where !mergedIndices.contains(index) {
+            let candidate = items[index]
+            guard candidate.kind == .message,
+                  candidate.isOwnMessage,
+                  candidate.id.hasPrefix("$"),
+                  candidate.roomID == localItem.roomID,
+                  candidate.senderID == localItem.senderID,
+                  !candidate.isDeleted,
+                  timestampsAreClose(localItem.timestamp, candidate.timestamp) else {
+                continue
+            }
+
+            let score = contentSimilarityScore(localItem, candidate)
+            guard score > bestScore else { continue }
+            bestScore = score
+            bestIndex = index
+        }
+
+        return bestScore >= 50 ? bestIndex : nil
+    }
+
+    private static func contentSimilarityScore(_ lhs: TimelineItem, _ rhs: TimelineItem) -> Int {
+        var score = 0
+
+        if normalizedBody(lhs.body) == normalizedBody(rhs.body) {
+            score += 60
+        }
+        if normalizedBody(lhs.replyPreview ?? "") == normalizedBody(rhs.replyPreview ?? "") {
+            score += 15
+        }
+        if mediaSignature(lhs) == mediaSignature(rhs) {
+            score += 40
+        }
+        if lhs.media == nil, rhs.media == nil {
+            score += 10
+        }
+        if lhs.isEncrypted == rhs.isEncrypted {
+            score += 5
+        }
+        score -= Int(abs(lhs.timestamp.timeIntervalSince(rhs.timestamp)))
+        return score
+    }
+
+    private static func mediaSignature(_ item: TimelineItem) -> String {
+        item.media.map {
+            "\($0.kind.rawValue)|\($0.sourceURL)|\($0.thumbnailSourceURL ?? "")|\($0.filename ?? "")"
+        } ?? ""
+    }
+
+    private static func normalizedBody(_ value: String) -> String {
+        value
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "\r\n", with: "\n")
     }
 
     private static func contentSignature(for item: TimelineItem) -> String {
