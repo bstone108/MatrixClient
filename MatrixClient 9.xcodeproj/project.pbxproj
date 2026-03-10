@@ -1,0 +1,1681 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		03B98F3B772C934A01904280 /* MatrixCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */; };
+		09A610D3D493CC2697A4786C /* StoredSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 512A08C9A4BD4BE79E040307 /* StoredSessionStore.swift */; };
+		0D39A5660DAD6BDFA6E92624 /* Persistence.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; };
+		0E929B6EAF5AF4EE8C28F7DB /* MatrixCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */; };
+		0FD7E921C0E10E48A621D379 /* GRDB in Frameworks */ = {isa = PBXBuildFile; productRef = F6DAF6FB7FA3EF2226A892FB /* GRDB */; };
+		0FF76DB30DA9F1C719A8D399 /* ReliableSendQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B77D4D00D2035323498958 /* ReliableSendQueueTests.swift */; };
+		134BF53CA10A43A45596810E /* DemoData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82DDDC54E9C2F1277CA62D7D /* DemoData.swift */; };
+		1677B234389B53CA0064C84B /* SupportBundleBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2318762FD74E8ADF7FCA00E3 /* SupportBundleBuilder.swift */; };
+		1A0E1CD053745D9E8707DCCF /* MatrixCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */; };
+		1E2A1FE4D08B6C33BFEBC51C /* Persistence.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; };
+		2385CBBDCA5CC2359C04778D /* MatrixApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = C86FEB588F4B1D1DBB0DAB40 /* MatrixApplicationDelegate.swift */; };
+		24C639AE1FFAA784284205BC /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9BC5D307DDBD3C0F3A81B0 /* Models.swift */; };
+		2A69FCF2DEF3D9600AB74D6A /* TimelineViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E7942585CE1A65AE71243CC /* TimelineViewController.swift */; };
+		2B1BB1CE5F2578B28CC9BD0E /* MatrixSDKBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 448C85273EC941D82FFD2D53 /* MatrixSDKBridge.swift */; };
+		2E76BD9FBADB9E6A4004CA20 /* WorkspaceStateController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9936E13035BF77FCFBCFC5D3 /* WorkspaceStateController.swift */; };
+		338030CC065BBD7320733D82 /* InspectorViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C43AB1A8B73A14B988327B6 /* InspectorViewController.swift */; };
+		36867785C3A2BEEACEC26FDE /* MatrixClientFacade.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4F349D275504363DA0F16C5 /* MatrixClientFacade.swift */; };
+		36BDA37AB4090E44953CE7C7 /* RoomListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0AD6574C466127BC50BE7442 /* RoomListViewController.swift */; };
+		37BC707C8CBB0767A39CFFF2 /* ReliableSendQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04505453266AAAEE352288CD /* ReliableSendQueue.swift */; };
+		3AEC4E050F48B44AAD2D7BDE /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
+		43BD258BFCB28F3BEA3910C0 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60373EDFC0DE3D31903A4FA0 /* main.swift */; };
+		4577B23E6E05E7615BDD790A /* MatrixCore.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		474D86F34C20934C8C91BE31 /* DiagnosticsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D5CA02E1E3E626A1CD38140 /* DiagnosticsService.swift */; };
+		487BC208E053572D4AD3DCE8 /* AsyncBroadcaster.swift in Sources */ = {isa = PBXBuildFile; fileRef = E054ADCA7EDFC055DC02C959 /* AsyncBroadcaster.swift */; };
+		59EB0743BF6C5083594F41D4 /* MediaKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2C35C5EED9D40F7789E6D9A9 /* MediaKit.framework */; };
+		60A31F2ADAE45FBB85423FBA /* Persistence.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; };
+		68749B5C57F9E15DEA6A494B /* TimelineUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 94C2CCF3C3D19C2011D2336C /* TimelineUI.framework */; };
+		7F7D687FF722221C5D57F2B1 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
+		8A34F06CA3505054CB940415 /* ApplicationEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 508AC0E8E096EC6CF96692D2 /* ApplicationEnvironment.swift */; };
+		8C92C3F98420F154B8DADBFE /* MatrixRustSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 86FE7FCE78E162787588E3B4 /* MatrixRustSDK */; };
+		8F79CEFB49FC8BD306875943 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8650C1E422E30485CFDC85B4 /* Assets.xcassets */; };
+		903AC053F2F469857A03E908 /* Persistence.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		90B6E31E9BB507B3695833D7 /* VLCKitPlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1909A679725A6FD6EC5793D /* VLCKitPlaybackEngine.swift */; };
+		938A66D66241097ED9EE523E /* TimelineStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17992F0F606FCF0035B7D669 /* TimelineStore.swift */; };
+		9688A2BDEA8C517866252E64 /* AppPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DE4CCAB3536418FE1068A5 /* AppPaths.swift */; };
+		98BC268CE43EEE0EDD09DBA1 /* QueuedMessageRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18B804FE484B042EA600BBC4 /* QueuedMessageRepository.swift */; };
+		A2B6C98BF22CF87E4B7C50B3 /* VLCKitSPM in Frameworks */ = {isa = PBXBuildFile; productRef = 5450F49E124291D4EF16F4D0 /* VLCKitSPM */; };
+		A5CC202EB4B5EA7A9C1A635B /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61B0F33C0F2BB9BF0BE319D /* main.swift */; };
+		AA998F6F95B77FCF48E99B30 /* AppShell.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */; };
+		B1A5708C81B6F71EFAC97573 /* QueuedMessageRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB38A79F3BBDA97B951F6412 /* QueuedMessageRepositoryTests.swift */; };
+		B8022498FD0FA60050DB1F1F /* MediaKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2C35C5EED9D40F7789E6D9A9 /* MediaKit.framework */; };
+		B9C1B9B1AFA047287E45260E /* MatrixClientService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B849AB14F50F23462B79F882 /* MatrixClientService.swift */; };
+		BDDFE5441D29A56D9A6F85F3 /* SlidingSyncCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */; };
+		C58F8962A889BB5818D06917 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
+		C6E7295328368EE3F9E62D68 /* AccountSessionActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62148665ED867021A3AC703 /* AccountSessionActor.swift */; };
+		C7A29B6B7AD6E0652EB66216 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
+		C8DED00A1B883675B8C88630 /* Persistence.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; };
+		CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903044045DB8284FCED08DC5 /* LoginViewController.swift */; };
+		D2E138EE48D975D55A520384 /* AppShell.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		D5134688AC8CADB5853F261A /* VideoPlaybackEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB96377E5D426ABB13B88667 /* VideoPlaybackEngine.swift */; };
+		D7E95FA6C6774733AD1ACF76 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
+		DBF5A34245AB42662B1479B9 /* MatrixCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */; };
+		DFD1723297B94E9E077623C1 /* LiveLoginSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */; };
+		E6A85A2F5E82E2F1519F6EC8 /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */; };
+		F0134873874E1BEBDEF5426F /* QueuedMessageRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A5F150756BBD55DA0A5F5E7 /* QueuedMessageRecord.swift */; };
+		F04877FE6D958ECF825592DD /* MatrixRustSDK+Concurrency.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57FEEDFDADE3926D1D9EACF8 /* MatrixRustSDK+Concurrency.swift */; };
+		F0F4596135E36AD510E99FCF /* RailViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 945AC57F18FD237DB624792F /* RailViewController.swift */; };
+		FFC66AD2F0863FB64EF116EF /* AppDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4231394A2C777D3B9D09DA03 /* AppDatabase.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		0B0B58A07966769C4A665C41 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 86E0F4422DC351830CBB45C3;
+			remoteInfo = MatrixCore;
+		};
+		14F9391DFEC719344DD25B38 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E889499F3E184607866B0AB4;
+			remoteInfo = MediaKit;
+		};
+		565A983AF128D4ECE397F09F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 76725354A3C9BEF823A14B03;
+			remoteInfo = AppShell;
+		};
+		581F11A3A9DDFDA95517E80B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 86E0F4422DC351830CBB45C3;
+			remoteInfo = MatrixCore;
+		};
+		6FB0824A034416773C453F67 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 41D00BEC34C49E4387011F38;
+			remoteInfo = Persistence;
+		};
+		70C99E13EB4E2311713493F9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E889499F3E184607866B0AB4;
+			remoteInfo = MediaKit;
+		};
+		799E2B487F55CD17E6942F3E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 86E0F4422DC351830CBB45C3;
+			remoteInfo = MatrixCore;
+		};
+		7A697EA99B2DEB76CCF4D2C6 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2248473D2932A3B376AC24B7;
+			remoteInfo = Diagnostics;
+		};
+		8AA12B88BC4F66F5026506A8 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2248473D2932A3B376AC24B7;
+			remoteInfo = Diagnostics;
+		};
+		8E5455BDF1B6F2FEDFDAF734 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2248473D2932A3B376AC24B7;
+			remoteInfo = Diagnostics;
+		};
+		A421E22F47C98A996E44ACCA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 41D00BEC34C49E4387011F38;
+			remoteInfo = Persistence;
+		};
+		BCBBB07050A945648456E120 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = BC671630FFE0594429088C0D;
+			remoteInfo = TimelineUI;
+		};
+		BD956E24A9B880C532347A5B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 41D00BEC34C49E4387011F38;
+			remoteInfo = Persistence;
+		};
+		C52ED5629061DC869B292B31 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2248473D2932A3B376AC24B7;
+			remoteInfo = Diagnostics;
+		};
+		C8C3D53A230CD66AAAA0FE5F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 86E0F4422DC351830CBB45C3;
+			remoteInfo = MatrixCore;
+		};
+		E221E0A44300383026DF894F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2248473D2932A3B376AC24B7;
+			remoteInfo = Diagnostics;
+		};
+		E6596EEF6ABB2459CF13B8DE /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = FD34FB2058F422F53C4945C7 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 41D00BEC34C49E4387011F38;
+			remoteInfo = Persistence;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		38F57D1F4220268CB82EAE8C /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				903AC053F2F469857A03E908 /* Persistence.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6B9A4F556A736CA742AB30F5 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				D2E138EE48D975D55A520384 /* AppShell.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		797837CC061C4EE1D6482E1F /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				4577B23E6E05E7615BDD790A /* MatrixCore.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		04505453266AAAEE352288CD /* ReliableSendQueue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReliableSendQueue.swift; sourceTree = "<group>"; };
+		0A5F150756BBD55DA0A5F5E7 /* QueuedMessageRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedMessageRecord.swift; sourceTree = "<group>"; };
+		0AD6574C466127BC50BE7442 /* RoomListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomListViewController.swift; sourceTree = "<group>"; };
+		0C43AB1A8B73A14B988327B6 /* InspectorViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorViewController.swift; sourceTree = "<group>"; };
+		17992F0F606FCF0035B7D669 /* TimelineStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineStore.swift; sourceTree = "<group>"; };
+		18B804FE484B042EA600BBC4 /* QueuedMessageRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedMessageRepository.swift; sourceTree = "<group>"; };
+		1940BC22265794D4828A0BD1 /* PersistenceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PersistenceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1B9BC5D307DDBD3C0F3A81B0 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		2318762FD74E8ADF7FCA00E3 /* SupportBundleBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupportBundleBuilder.swift; sourceTree = "<group>"; };
+		29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = AppShell.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		2C35C5EED9D40F7789E6D9A9 /* MediaKit.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MediaKit.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		32B77D4D00D2035323498958 /* ReliableSendQueueTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReliableSendQueueTests.swift; sourceTree = "<group>"; };
+		4231394A2C777D3B9D09DA03 /* AppDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDatabase.swift; sourceTree = "<group>"; };
+		448C85273EC941D82FFD2D53 /* MatrixSDKBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixSDKBridge.swift; sourceTree = "<group>"; };
+		4CD5B24A3D7FD395A804983B /* Persistence.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Persistence.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		4F01592D1B14BC107572C349 /* MatrixCoreTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MatrixCoreTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		508AC0E8E096EC6CF96692D2 /* ApplicationEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationEnvironment.swift; sourceTree = "<group>"; };
+		512A08C9A4BD4BE79E040307 /* StoredSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoredSessionStore.swift; sourceTree = "<group>"; };
+		57FEEDFDADE3926D1D9EACF8 /* MatrixRustSDK+Concurrency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MatrixRustSDK+Concurrency.swift"; sourceTree = "<group>"; };
+		5D5CA02E1E3E626A1CD38140 /* DiagnosticsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsService.swift; sourceTree = "<group>"; };
+		5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Diagnostics.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		60373EDFC0DE3D31903A4FA0 /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		79DE4CCAB3536418FE1068A5 /* AppPaths.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppPaths.swift; sourceTree = "<group>"; };
+		7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MatrixCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		82DDDC54E9C2F1277CA62D7D /* DemoData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoData.swift; sourceTree = "<group>"; };
+		8650C1E422E30485CFDC85B4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		903044045DB8284FCED08DC5 /* LoginViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginViewController.swift; sourceTree = "<group>"; };
+		945AC57F18FD237DB624792F /* RailViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RailViewController.swift; sourceTree = "<group>"; };
+		94C2CCF3C3D19C2011D2336C /* TimelineUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = TimelineUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
+		9936E13035BF77FCFBCFC5D3 /* WorkspaceStateController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceStateController.swift; sourceTree = "<group>"; };
+		9E7942585CE1A65AE71243CC /* TimelineViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineViewController.swift; sourceTree = "<group>"; };
+		AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlidingSyncCoordinator.swift; sourceTree = "<group>"; };
+		AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLoginSmokeTests.swift; sourceTree = "<group>"; };
+		B849AB14F50F23462B79F882 /* MatrixClientService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixClientService.swift; sourceTree = "<group>"; };
+		C802D7A603B5971793D9F707 /* MatrixLiveSmoke */ = {isa = PBXFileReference; includeInIndex = 0; path = MatrixLiveSmoke; sourceTree = BUILT_PRODUCTS_DIR; };
+		C86FEB588F4B1D1DBB0DAB40 /* MatrixApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixApplicationDelegate.swift; sourceTree = "<group>"; };
+		D1909A679725A6FD6EC5793D /* VLCKitPlaybackEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VLCKitPlaybackEngine.swift; sourceTree = "<group>"; };
+		DB96377E5D426ABB13B88667 /* VideoPlaybackEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoPlaybackEngine.swift; sourceTree = "<group>"; };
+		E054ADCA7EDFC055DC02C959 /* AsyncBroadcaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncBroadcaster.swift; sourceTree = "<group>"; };
+		E61B0F33C0F2BB9BF0BE319D /* main.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>"; };
+		E62148665ED867021A3AC703 /* AccountSessionActor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSessionActor.swift; sourceTree = "<group>"; };
+		ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowController.swift; sourceTree = "<group>"; };
+		F2812A99A962CA56DCB10869 /* MatrixClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MatrixClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		F4F349D275504363DA0F16C5 /* MatrixClientFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixClientFacade.swift; sourceTree = "<group>"; };
+		FB38A79F3BBDA97B951F6412 /* QueuedMessageRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedMessageRepositoryTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		11AE913F484910AA5B6EF184 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0D39A5660DAD6BDFA6E92624 /* Persistence.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1CBA9A1BE3A024797C0516DC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A0E1CD053745D9E8707DCCF /* MatrixCore.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		24891287D634A77F9EBE5AEC /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA998F6F95B77FCF48E99B30 /* AppShell.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		332CC8C88682E8078873DAD3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C7A29B6B7AD6E0652EB66216 /* Diagnostics.framework in Frameworks */,
+				0FD7E921C0E10E48A621D379 /* GRDB in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		445BD58BA29EE67F510A7B67 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1E2A1FE4D08B6C33BFEBC51C /* Persistence.framework in Frameworks */,
+				3AEC4E050F48B44AAD2D7BDE /* Diagnostics.framework in Frameworks */,
+				8C92C3F98420F154B8DADBFE /* MatrixRustSDK in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		46B53D3AB5C67655FBF64668 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7F7D687FF722221C5D57F2B1 /* Diagnostics.framework in Frameworks */,
+				A2B6C98BF22CF87E4B7C50B3 /* VLCKitSPM in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		705192654FA34C3916CB13A8 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0E929B6EAF5AF4EE8C28F7DB /* MatrixCore.framework in Frameworks */,
+				59EB0743BF6C5083594F41D4 /* MediaKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8576D43918950AC904CC5673 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				03B98F3B772C934A01904280 /* MatrixCore.framework in Frameworks */,
+				C8DED00A1B883675B8C88630 /* Persistence.framework in Frameworks */,
+				C58F8962A889BB5818D06917 /* Diagnostics.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		90C8E1FF63B115BDFC51DF9A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DBF5A34245AB42662B1479B9 /* MatrixCore.framework in Frameworks */,
+				68749B5C57F9E15DEA6A494B /* TimelineUI.framework in Frameworks */,
+				B8022498FD0FA60050DB1F1F /* MediaKit.framework in Frameworks */,
+				60A31F2ADAE45FBB85423FBA /* Persistence.framework in Frameworks */,
+				D7E95FA6C6774733AD1ACF76 /* Diagnostics.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		01D9E668226EB0CF1AA32E67 /* MatrixCoreTests */ = {
+			isa = PBXGroup;
+			children = (
+				AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */,
+				32B77D4D00D2035323498958 /* ReliableSendQueueTests.swift */,
+			);
+			path = MatrixCoreTests;
+			sourceTree = "<group>";
+		};
+		0E961571D080FB1F0CBD45BE /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				01D9E668226EB0CF1AA32E67 /* MatrixCoreTests */,
+				3980D766B843E9303B82D715 /* PersistenceTests */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		2D6B4BB96E84D202EB898E37 /* Persistence */ = {
+			isa = PBXGroup;
+			children = (
+				4231394A2C777D3B9D09DA03 /* AppDatabase.swift */,
+				79DE4CCAB3536418FE1068A5 /* AppPaths.swift */,
+				0A5F150756BBD55DA0A5F5E7 /* QueuedMessageRecord.swift */,
+				18B804FE484B042EA600BBC4 /* QueuedMessageRepository.swift */,
+			);
+			path = Persistence;
+			sourceTree = "<group>";
+		};
+		377B054F092C827A50278553 /* MediaKit */ = {
+			isa = PBXGroup;
+			children = (
+				DB96377E5D426ABB13B88667 /* VideoPlaybackEngine.swift */,
+				D1909A679725A6FD6EC5793D /* VLCKitPlaybackEngine.swift */,
+			);
+			path = MediaKit;
+			sourceTree = "<group>";
+		};
+		3980D766B843E9303B82D715 /* PersistenceTests */ = {
+			isa = PBXGroup;
+			children = (
+				FB38A79F3BBDA97B951F6412 /* QueuedMessageRepositoryTests.swift */,
+			);
+			path = PersistenceTests;
+			sourceTree = "<group>";
+		};
+		3A85BCFEC2BD3969F975A87C /* MatrixCore */ = {
+			isa = PBXGroup;
+			children = (
+				E62148665ED867021A3AC703 /* AccountSessionActor.swift */,
+				E054ADCA7EDFC055DC02C959 /* AsyncBroadcaster.swift */,
+				82DDDC54E9C2F1277CA62D7D /* DemoData.swift */,
+				F4F349D275504363DA0F16C5 /* MatrixClientFacade.swift */,
+				B849AB14F50F23462B79F882 /* MatrixClientService.swift */,
+				57FEEDFDADE3926D1D9EACF8 /* MatrixRustSDK+Concurrency.swift */,
+				448C85273EC941D82FFD2D53 /* MatrixSDKBridge.swift */,
+				1B9BC5D307DDBD3C0F3A81B0 /* Models.swift */,
+				04505453266AAAEE352288CD /* ReliableSendQueue.swift */,
+				AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */,
+				512A08C9A4BD4BE79E040307 /* StoredSessionStore.swift */,
+				17992F0F606FCF0035B7D669 /* TimelineStore.swift */,
+			);
+			path = MatrixCore;
+			sourceTree = "<group>";
+		};
+		6DD9787294861F3C141626BE = {
+			isa = PBXGroup;
+			children = (
+				D679710844F4E79E72A2B1F5 /* Resources */,
+				F13AB5A9B670D7F1F33FB946 /* Sources */,
+				0E961571D080FB1F0CBD45BE /* Tests */,
+				B3660D4A40C47A7EB59997EC /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		7F0E37354B2AC197ECF82412 /* TimelineUI */ = {
+			isa = PBXGroup;
+			children = (
+				9E7942585CE1A65AE71243CC /* TimelineViewController.swift */,
+			);
+			path = TimelineUI;
+			sourceTree = "<group>";
+		};
+		A856E71164E8B06532C677EA /* MatrixClientApp */ = {
+			isa = PBXGroup;
+			children = (
+				60373EDFC0DE3D31903A4FA0 /* main.swift */,
+			);
+			path = MatrixClientApp;
+			sourceTree = "<group>";
+		};
+		B3660D4A40C47A7EB59997EC /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */,
+				5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */,
+				F2812A99A962CA56DCB10869 /* MatrixClient.app */,
+				7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */,
+				4F01592D1B14BC107572C349 /* MatrixCoreTests.xctest */,
+				C802D7A603B5971793D9F707 /* MatrixLiveSmoke */,
+				2C35C5EED9D40F7789E6D9A9 /* MediaKit.framework */,
+				4CD5B24A3D7FD395A804983B /* Persistence.framework */,
+				1940BC22265794D4828A0BD1 /* PersistenceTests.xctest */,
+				94C2CCF3C3D19C2011D2336C /* TimelineUI.framework */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		D679710844F4E79E72A2B1F5 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				8650C1E422E30485CFDC85B4 /* Assets.xcassets */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		D6CF96C12CABA35F1063BE5B /* Diagnostics */ = {
+			isa = PBXGroup;
+			children = (
+				5D5CA02E1E3E626A1CD38140 /* DiagnosticsService.swift */,
+				2318762FD74E8ADF7FCA00E3 /* SupportBundleBuilder.swift */,
+			);
+			path = Diagnostics;
+			sourceTree = "<group>";
+		};
+		DB7E6BF7FFC189C3A9C65570 /* AppShell */ = {
+			isa = PBXGroup;
+			children = (
+				508AC0E8E096EC6CF96692D2 /* ApplicationEnvironment.swift */,
+				0C43AB1A8B73A14B988327B6 /* InspectorViewController.swift */,
+				903044045DB8284FCED08DC5 /* LoginViewController.swift */,
+				ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */,
+				C86FEB588F4B1D1DBB0DAB40 /* MatrixApplicationDelegate.swift */,
+				945AC57F18FD237DB624792F /* RailViewController.swift */,
+				0AD6574C466127BC50BE7442 /* RoomListViewController.swift */,
+				9936E13035BF77FCFBCFC5D3 /* WorkspaceStateController.swift */,
+			);
+			path = AppShell;
+			sourceTree = "<group>";
+		};
+		EE0A2DE51146C0E989533873 /* MatrixLiveSmoke */ = {
+			isa = PBXGroup;
+			children = (
+				E61B0F33C0F2BB9BF0BE319D /* main.swift */,
+			);
+			path = MatrixLiveSmoke;
+			sourceTree = "<group>";
+		};
+		F13AB5A9B670D7F1F33FB946 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				DB7E6BF7FFC189C3A9C65570 /* AppShell */,
+				D6CF96C12CABA35F1063BE5B /* Diagnostics */,
+				A856E71164E8B06532C677EA /* MatrixClientApp */,
+				3A85BCFEC2BD3969F975A87C /* MatrixCore */,
+				EE0A2DE51146C0E989533873 /* MatrixLiveSmoke */,
+				377B054F092C827A50278553 /* MediaKit */,
+				2D6B4BB96E84D202EB898E37 /* Persistence */,
+				7F0E37354B2AC197ECF82412 /* TimelineUI */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		2248473D2932A3B376AC24B7 /* Diagnostics */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 69760C75E47C954EF3AD0371 /* Build configuration list for PBXNativeTarget "Diagnostics" */;
+			buildPhases = (
+				58E710EE8DD61266DF2408B7 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Diagnostics;
+			packageProductDependencies = (
+			);
+			productName = Diagnostics;
+			productReference = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		41D00BEC34C49E4387011F38 /* Persistence */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B69D8B7AADC3CE30F4035927 /* Build configuration list for PBXNativeTarget "Persistence" */;
+			buildPhases = (
+				A3B90E85289A309985364CF9 /* Sources */,
+				332CC8C88682E8078873DAD3 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				78AB2BD601F0977FD1D8239C /* PBXTargetDependency */,
+			);
+			name = Persistence;
+			packageProductDependencies = (
+				F6DAF6FB7FA3EF2226A892FB /* GRDB */,
+			);
+			productName = Persistence;
+			productReference = 4CD5B24A3D7FD395A804983B /* Persistence.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		565DF3D5F43CAE4887D1BF7C /* MatrixCoreTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2867C4A69D1B0CC416947521 /* Build configuration list for PBXNativeTarget "MatrixCoreTests" */;
+			buildPhases = (
+				67F1BA1DABDC7F5299D8DC5A /* Sources */,
+				1CBA9A1BE3A024797C0516DC /* Frameworks */,
+				797837CC061C4EE1D6482E1F /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				251BA5A628E434D599C25498 /* PBXTargetDependency */,
+			);
+			name = MatrixCoreTests;
+			packageProductDependencies = (
+			);
+			productName = MatrixCoreTests;
+			productReference = 4F01592D1B14BC107572C349 /* MatrixCoreTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		76725354A3C9BEF823A14B03 /* AppShell */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = ADE463075044AE119C85693F /* Build configuration list for PBXNativeTarget "AppShell" */;
+			buildPhases = (
+				436848A473EBEF129FC0B271 /* Sources */,
+				90C8E1FF63B115BDFC51DF9A /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				77C7CC3F471073A3A21D586C /* PBXTargetDependency */,
+				0609823FA629C8DB55566D9B /* PBXTargetDependency */,
+				B057FED0C35272140448113B /* PBXTargetDependency */,
+				79A731A86212173C8FCBABF9 /* PBXTargetDependency */,
+				3C3B33C9FB221DC1BEE2403B /* PBXTargetDependency */,
+			);
+			name = AppShell;
+			packageProductDependencies = (
+			);
+			productName = AppShell;
+			productReference = 29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		86E0F4422DC351830CBB45C3 /* MatrixCore */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B19C8ABD3340962428B1DE56 /* Build configuration list for PBXNativeTarget "MatrixCore" */;
+			buildPhases = (
+				61138CF0877DB688BC153CDE /* Sources */,
+				445BD58BA29EE67F510A7B67 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				2F8936EFE8B9AB956A5BA365 /* PBXTargetDependency */,
+				B7E779AABBA318D440D5B631 /* PBXTargetDependency */,
+			);
+			name = MatrixCore;
+			packageProductDependencies = (
+				86FE7FCE78E162787588E3B4 /* MatrixRustSDK */,
+			);
+			productName = MatrixCore;
+			productReference = 7FEACD282C28F1FB0E6B5737 /* MatrixCore.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		A350AD3413A9EA849ACE5F9C /* MatrixLiveSmoke */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 324A0435FD16BD7DCC6AA1BE /* Build configuration list for PBXNativeTarget "MatrixLiveSmoke" */;
+			buildPhases = (
+				C4BC39A52EBC1EB31D142C52 /* Sources */,
+				8576D43918950AC904CC5673 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				85708201E8DF711AA0DBDC87 /* PBXTargetDependency */,
+				691AAD147973C981E2BCE112 /* PBXTargetDependency */,
+				3F5487A154C37E1AE75A253B /* PBXTargetDependency */,
+			);
+			name = MatrixLiveSmoke;
+			packageProductDependencies = (
+			);
+			productName = MatrixLiveSmoke;
+			productReference = C802D7A603B5971793D9F707 /* MatrixLiveSmoke */;
+			productType = "com.apple.product-type.tool";
+		};
+		A4100146072890543DD0E933 /* PersistenceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2733FE1D4C9660FB3339BC43 /* Build configuration list for PBXNativeTarget "PersistenceTests" */;
+			buildPhases = (
+				22C608B8BC271D83F2304E25 /* Sources */,
+				11AE913F484910AA5B6EF184 /* Frameworks */,
+				38F57D1F4220268CB82EAE8C /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8A1906DB5328E0B46F8FE87E /* PBXTargetDependency */,
+			);
+			name = PersistenceTests;
+			packageProductDependencies = (
+			);
+			productName = PersistenceTests;
+			productReference = 1940BC22265794D4828A0BD1 /* PersistenceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		BB92585AE58659B653562192 /* MatrixClient */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1862BA65F2336DF0FB6C1A1D /* Build configuration list for PBXNativeTarget "MatrixClient" */;
+			buildPhases = (
+				C042EF5AD05A5B226D5829DA /* Sources */,
+				3846B260F124D6A81CFFEFC3 /* Resources */,
+				24891287D634A77F9EBE5AEC /* Frameworks */,
+				6B9A4F556A736CA742AB30F5 /* Embed Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				46C059FAAD46D08C1374FC3F /* PBXTargetDependency */,
+			);
+			name = MatrixClient;
+			packageProductDependencies = (
+			);
+			productName = MatrixClient;
+			productReference = F2812A99A962CA56DCB10869 /* MatrixClient.app */;
+			productType = "com.apple.product-type.application";
+		};
+		BC671630FFE0594429088C0D /* TimelineUI */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 751A551AA5336E2804E08C0A /* Build configuration list for PBXNativeTarget "TimelineUI" */;
+			buildPhases = (
+				25260C26BE0F4F853DEBDD78 /* Sources */,
+				705192654FA34C3916CB13A8 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D00013321FB510F79678B1AB /* PBXTargetDependency */,
+				47AF32FEE88601911C7431B5 /* PBXTargetDependency */,
+			);
+			name = TimelineUI;
+			packageProductDependencies = (
+			);
+			productName = TimelineUI;
+			productReference = 94C2CCF3C3D19C2011D2336C /* TimelineUI.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+		E889499F3E184607866B0AB4 /* MediaKit */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 629A0D3A302D71256B3DAA5A /* Build configuration list for PBXNativeTarget "MediaKit" */;
+			buildPhases = (
+				169CCC49D7DF09979E8B82DE /* Sources */,
+				46B53D3AB5C67655FBF64668 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				80FA9CC50BBC5C531D2E1F2A /* PBXTargetDependency */,
+			);
+			name = MediaKit;
+			packageProductDependencies = (
+				5450F49E124291D4EF16F4D0 /* VLCKitSPM */,
+			);
+			productName = MediaKit;
+			productReference = 2C35C5EED9D40F7789E6D9A9 /* MediaKit.framework */;
+			productType = "com.apple.product-type.framework";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		FD34FB2058F422F53C4945C7 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					BB92585AE58659B653562192 = {
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = D2ED968F8B91FA8A94CE4925 /* Build configuration list for PBXProject "MatrixClient" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 6DD9787294861F3C141626BE;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				6F1D92A4E95911CE3C29090A /* XCRemoteSwiftPackageReference "GRDB.swift" */,
+				53538C4C103D726E81B62496 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */,
+				83D46BB151F383DA1FC5815E /* XCRemoteSwiftPackageReference "vlckit-spm" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = B3660D4A40C47A7EB59997EC /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				76725354A3C9BEF823A14B03 /* AppShell */,
+				2248473D2932A3B376AC24B7 /* Diagnostics */,
+				BB92585AE58659B653562192 /* MatrixClient */,
+				86E0F4422DC351830CBB45C3 /* MatrixCore */,
+				565DF3D5F43CAE4887D1BF7C /* MatrixCoreTests */,
+				A350AD3413A9EA849ACE5F9C /* MatrixLiveSmoke */,
+				E889499F3E184607866B0AB4 /* MediaKit */,
+				41D00BEC34C49E4387011F38 /* Persistence */,
+				A4100146072890543DD0E933 /* PersistenceTests */,
+				BC671630FFE0594429088C0D /* TimelineUI */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3846B260F124D6A81CFFEFC3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8F79CEFB49FC8BD306875943 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		169CCC49D7DF09979E8B82DE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90B6E31E9BB507B3695833D7 /* VLCKitPlaybackEngine.swift in Sources */,
+				D5134688AC8CADB5853F261A /* VideoPlaybackEngine.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		22C608B8BC271D83F2304E25 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B1A5708C81B6F71EFAC97573 /* QueuedMessageRepositoryTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		25260C26BE0F4F853DEBDD78 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2A69FCF2DEF3D9600AB74D6A /* TimelineViewController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		436848A473EBEF129FC0B271 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8A34F06CA3505054CB940415 /* ApplicationEnvironment.swift in Sources */,
+				338030CC065BBD7320733D82 /* InspectorViewController.swift in Sources */,
+				CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */,
+				E6A85A2F5E82E2F1519F6EC8 /* MainWindowController.swift in Sources */,
+				2385CBBDCA5CC2359C04778D /* MatrixApplicationDelegate.swift in Sources */,
+				F0F4596135E36AD510E99FCF /* RailViewController.swift in Sources */,
+				36BDA37AB4090E44953CE7C7 /* RoomListViewController.swift in Sources */,
+				2E76BD9FBADB9E6A4004CA20 /* WorkspaceStateController.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		58E710EE8DD61266DF2408B7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				474D86F34C20934C8C91BE31 /* DiagnosticsService.swift in Sources */,
+				1677B234389B53CA0064C84B /* SupportBundleBuilder.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		61138CF0877DB688BC153CDE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C6E7295328368EE3F9E62D68 /* AccountSessionActor.swift in Sources */,
+				487BC208E053572D4AD3DCE8 /* AsyncBroadcaster.swift in Sources */,
+				134BF53CA10A43A45596810E /* DemoData.swift in Sources */,
+				36867785C3A2BEEACEC26FDE /* MatrixClientFacade.swift in Sources */,
+				B9C1B9B1AFA047287E45260E /* MatrixClientService.swift in Sources */,
+				F04877FE6D958ECF825592DD /* MatrixRustSDK+Concurrency.swift in Sources */,
+				2B1BB1CE5F2578B28CC9BD0E /* MatrixSDKBridge.swift in Sources */,
+				24C639AE1FFAA784284205BC /* Models.swift in Sources */,
+				37BC707C8CBB0767A39CFFF2 /* ReliableSendQueue.swift in Sources */,
+				BDDFE5441D29A56D9A6F85F3 /* SlidingSyncCoordinator.swift in Sources */,
+				09A610D3D493CC2697A4786C /* StoredSessionStore.swift in Sources */,
+				938A66D66241097ED9EE523E /* TimelineStore.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		67F1BA1DABDC7F5299D8DC5A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DFD1723297B94E9E077623C1 /* LiveLoginSmokeTests.swift in Sources */,
+				0FF76DB30DA9F1C719A8D399 /* ReliableSendQueueTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A3B90E85289A309985364CF9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FFC66AD2F0863FB64EF116EF /* AppDatabase.swift in Sources */,
+				9688A2BDEA8C517866252E64 /* AppPaths.swift in Sources */,
+				F0134873874E1BEBDEF5426F /* QueuedMessageRecord.swift in Sources */,
+				98BC268CE43EEE0EDD09DBA1 /* QueuedMessageRepository.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C042EF5AD05A5B226D5829DA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				43BD258BFCB28F3BEA3910C0 /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C4BC39A52EBC1EB31D142C52 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A5CC202EB4B5EA7A9C1A635B /* main.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		0609823FA629C8DB55566D9B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = BC671630FFE0594429088C0D /* TimelineUI */;
+			targetProxy = BCBBB07050A945648456E120 /* PBXContainerItemProxy */;
+		};
+		251BA5A628E434D599C25498 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 86E0F4422DC351830CBB45C3 /* MatrixCore */;
+			targetProxy = C8C3D53A230CD66AAAA0FE5F /* PBXContainerItemProxy */;
+		};
+		2F8936EFE8B9AB956A5BA365 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 41D00BEC34C49E4387011F38 /* Persistence */;
+			targetProxy = 6FB0824A034416773C453F67 /* PBXContainerItemProxy */;
+		};
+		3C3B33C9FB221DC1BEE2403B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2248473D2932A3B376AC24B7 /* Diagnostics */;
+			targetProxy = 8E5455BDF1B6F2FEDFDAF734 /* PBXContainerItemProxy */;
+		};
+		3F5487A154C37E1AE75A253B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2248473D2932A3B376AC24B7 /* Diagnostics */;
+			targetProxy = C52ED5629061DC869B292B31 /* PBXContainerItemProxy */;
+		};
+		46C059FAAD46D08C1374FC3F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 76725354A3C9BEF823A14B03 /* AppShell */;
+			targetProxy = 565A983AF128D4ECE397F09F /* PBXContainerItemProxy */;
+		};
+		47AF32FEE88601911C7431B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E889499F3E184607866B0AB4 /* MediaKit */;
+			targetProxy = 14F9391DFEC719344DD25B38 /* PBXContainerItemProxy */;
+		};
+		691AAD147973C981E2BCE112 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 41D00BEC34C49E4387011F38 /* Persistence */;
+			targetProxy = BD956E24A9B880C532347A5B /* PBXContainerItemProxy */;
+		};
+		77C7CC3F471073A3A21D586C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 86E0F4422DC351830CBB45C3 /* MatrixCore */;
+			targetProxy = 581F11A3A9DDFDA95517E80B /* PBXContainerItemProxy */;
+		};
+		78AB2BD601F0977FD1D8239C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2248473D2932A3B376AC24B7 /* Diagnostics */;
+			targetProxy = 8AA12B88BC4F66F5026506A8 /* PBXContainerItemProxy */;
+		};
+		79A731A86212173C8FCBABF9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 41D00BEC34C49E4387011F38 /* Persistence */;
+			targetProxy = A421E22F47C98A996E44ACCA /* PBXContainerItemProxy */;
+		};
+		80FA9CC50BBC5C531D2E1F2A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2248473D2932A3B376AC24B7 /* Diagnostics */;
+			targetProxy = 7A697EA99B2DEB76CCF4D2C6 /* PBXContainerItemProxy */;
+		};
+		85708201E8DF711AA0DBDC87 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 86E0F4422DC351830CBB45C3 /* MatrixCore */;
+			targetProxy = 799E2B487F55CD17E6942F3E /* PBXContainerItemProxy */;
+		};
+		8A1906DB5328E0B46F8FE87E /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 41D00BEC34C49E4387011F38 /* Persistence */;
+			targetProxy = E6596EEF6ABB2459CF13B8DE /* PBXContainerItemProxy */;
+		};
+		B057FED0C35272140448113B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E889499F3E184607866B0AB4 /* MediaKit */;
+			targetProxy = 70C99E13EB4E2311713493F9 /* PBXContainerItemProxy */;
+		};
+		B7E779AABBA318D440D5B631 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2248473D2932A3B376AC24B7 /* Diagnostics */;
+			targetProxy = E221E0A44300383026DF894F /* PBXContainerItemProxy */;
+		};
+		D00013321FB510F79678B1AB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 86E0F4422DC351830CBB45C3 /* MatrixCore */;
+			targetProxy = 0B0B58A07966769C4A665C41 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		0726A0F539FEE4415D80F0AB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.MatrixLiveSmoke;
+				PRODUCT_NAME = MatrixLiveSmoke;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Debug;
+		};
+		0E2CA058A174AC73CAA0C3DB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.TimelineUI;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		10E8A30B5100AC6E912936E8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.MatrixCore;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		118FFE6DDC5847A30352101F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Config/MatrixClient-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient;
+				PRODUCT_NAME = MatrixClient;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		122CC78EB13D9575AA4BF178 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		27F8CD01D83D3E2B2E8D7DEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.Persistence;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		2FAA2C9DEB3F7F4F40D6FD00 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		352128C09C33911FEB4BB2C5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.TimelineUI;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		3A18238A51E37BE6891FDDCF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.MediaKit;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		47E57CAF16A2DABFCE952B4A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.Diagnostics;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		57D5E18A40CBBF6279F02FB0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_FILE = "Config/MatrixClient-Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient;
+				PRODUCT_NAME = MatrixClient;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		63B02F92B8A1279171A18014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.MatrixLiveSmoke;
+				PRODUCT_NAME = MatrixLiveSmoke;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+			};
+			name = Release;
+		};
+		729323BE5104E7213413DAEB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.Diagnostics;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		933AFCCC40C8092E101AAB53 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		97D817F9131E9236DB195834 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.Persistence;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		A045EF516EB078E84C816CE0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.AppShell;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
+		};
+		B3319A51B6F2FA668F361A32 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.AppShell;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		B397CBEA4571C0C3BDCF32DB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		D41D41551448D7D645AEA80F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.MatrixCore;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		F562FE3EC94A6D13C3C01102 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		F63785C0CA6BFC7A8BEB89A7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brandonstone.MatrixClient.MediaKit;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
+		FE00FC2DF18D1AB47BCF18D3 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1862BA65F2336DF0FB6C1A1D /* Build configuration list for PBXNativeTarget "MatrixClient" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				57D5E18A40CBBF6279F02FB0 /* Debug */,
+				118FFE6DDC5847A30352101F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		2733FE1D4C9660FB3339BC43 /* Build configuration list for PBXNativeTarget "PersistenceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B397CBEA4571C0C3BDCF32DB /* Debug */,
+				F562FE3EC94A6D13C3C01102 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		2867C4A69D1B0CC416947521 /* Build configuration list for PBXNativeTarget "MatrixCoreTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FE00FC2DF18D1AB47BCF18D3 /* Debug */,
+				2FAA2C9DEB3F7F4F40D6FD00 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		324A0435FD16BD7DCC6AA1BE /* Build configuration list for PBXNativeTarget "MatrixLiveSmoke" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0726A0F539FEE4415D80F0AB /* Debug */,
+				63B02F92B8A1279171A18014 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		629A0D3A302D71256B3DAA5A /* Build configuration list for PBXNativeTarget "MediaKit" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3A18238A51E37BE6891FDDCF /* Debug */,
+				F63785C0CA6BFC7A8BEB89A7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		69760C75E47C954EF3AD0371 /* Build configuration list for PBXNativeTarget "Diagnostics" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				729323BE5104E7213413DAEB /* Debug */,
+				47E57CAF16A2DABFCE952B4A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		751A551AA5336E2804E08C0A /* Build configuration list for PBXNativeTarget "TimelineUI" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0E2CA058A174AC73CAA0C3DB /* Debug */,
+				352128C09C33911FEB4BB2C5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		ADE463075044AE119C85693F /* Build configuration list for PBXNativeTarget "AppShell" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A045EF516EB078E84C816CE0 /* Debug */,
+				B3319A51B6F2FA668F361A32 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B19C8ABD3340962428B1DE56 /* Build configuration list for PBXNativeTarget "MatrixCore" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				10E8A30B5100AC6E912936E8 /* Debug */,
+				D41D41551448D7D645AEA80F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B69D8B7AADC3CE30F4035927 /* Build configuration list for PBXNativeTarget "Persistence" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				27F8CD01D83D3E2B2E8D7DEF /* Debug */,
+				97D817F9131E9236DB195834 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D2ED968F8B91FA8A94CE4925 /* Build configuration list for PBXProject "MatrixClient" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				933AFCCC40C8092E101AAB53 /* Debug */,
+				122CC78EB13D9575AA4BF178 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		53538C4C103D726E81B62496 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/matrix-org/matrix-rust-components-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.2.0;
+			};
+		};
+		6F1D92A4E95911CE3C29090A /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/groue/GRDB.swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.9.0;
+			};
+		};
+		83D46BB151F383DA1FC5815E /* XCRemoteSwiftPackageReference "vlckit-spm" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/tylerjonesio/vlckit-spm.git";
+			requirement = {
+				kind = exactVersion;
+				version = 3.6.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5450F49E124291D4EF16F4D0 /* VLCKitSPM */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 83D46BB151F383DA1FC5815E /* XCRemoteSwiftPackageReference "vlckit-spm" */;
+			productName = VLCKitSPM;
+		};
+		86FE7FCE78E162787588E3B4 /* MatrixRustSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 53538C4C103D726E81B62496 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */;
+			productName = MatrixRustSDK;
+		};
+		F6DAF6FB7FA3EF2226A892FB /* GRDB */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 6F1D92A4E95911CE3C29090A /* XCRemoteSwiftPackageReference "GRDB.swift" */;
+			productName = GRDB;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = FD34FB2058F422F53C4945C7 /* Project object */;
+}
