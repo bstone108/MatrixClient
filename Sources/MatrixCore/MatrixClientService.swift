@@ -341,33 +341,15 @@ public actor MatrixClientService: MatrixClientFacade {
                  let .SlidingSync(message),
                  let .SlidingSyncVersion(message),
                  let .Sdk(message),
-                 let .Generic(message):
+                 let .EventCache(message),
+                 let .InvalidRawKey(message):
+                return message
+            case let .Generic(message):
                 return message
             }
         }
-        if let clientError = error as? ClientError, case let .Generic(msg) = clientError {
+        if let clientError = error as? ClientError, case let .Generic(msg, _) = clientError {
             return msg
-        }
-        if let roomListError = error as? RoomListError {
-            switch roomListError {
-            case let .SlidingSync(error),
-                 let .InvalidRoomId(error),
-                 let .InitializingTimeline(error),
-                 let .EventCache(error):
-                return error
-            case let .UnknownList(listName):
-                return "Unknown room list: \(listName)"
-            case .InputCannotBeApplied:
-                return "A room list update could not be applied."
-            case let .RoomNotFound(roomName):
-                return "Room not found: \(roomName)"
-            case let .TimelineAlreadyExists(roomName):
-                return "Timeline already exists for \(roomName)."
-            case let .TimelineNotInitialized(roomName):
-                return "Timeline not initialized for \(roomName)."
-            case let .IncorrectRoomMembership(expected, actual):
-                return "Incorrect room membership. Expected \(expected), got \(actual)."
-            }
         }
         #endif
 

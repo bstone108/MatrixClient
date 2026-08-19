@@ -819,16 +819,16 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				76725354A3C9BEF823A14B03 /* AppShell */,
-				2248473D2932A3B376AC24B7 /* Diagnostics */,
 				BB92585AE58659B653562192 /* MatrixClient */,
+				76725354A3C9BEF823A14B03 /* AppShell */,
 				86E0F4422DC351830CBB45C3 /* MatrixCore */,
-				565DF3D5F43CAE4887D1BF7C /* MatrixCoreTests */,
-				A350AD3413A9EA849ACE5F9C /* MatrixLiveSmoke */,
+				BC671630FFE0594429088C0D /* TimelineUI */,
 				E889499F3E184607866B0AB4 /* MediaKit */,
 				41D00BEC34C49E4387011F38 /* Persistence */,
+				2248473D2932A3B376AC24B7 /* Diagnostics */,
+				A350AD3413A9EA849ACE5F9C /* MatrixLiveSmoke */,
+				565DF3D5F43CAE4887D1BF7C /* MatrixCoreTests */,
 				A4100146072890543DD0E933 /* PersistenceTests */,
-				BC671630FFE0594429088C0D /* TimelineUI */,
 			);
 		};
 /* End PBXProject section */
@@ -1713,8 +1713,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/matrix-org/matrix-rust-components-swift.git";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.2.0;
+				branch = main;
+				kind = branch;
 			};
 		};
 		6F1D92A4E95911CE3C29090A /* XCRemoteSwiftPackageReference "GRDB.swift" */ = {

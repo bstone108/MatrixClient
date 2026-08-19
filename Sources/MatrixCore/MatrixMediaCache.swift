@@ -386,7 +386,7 @@ public actor MatrixMediaCache {
         let handle = try await performSDKMediaFetch(priority: .original) {
             try await self.client.getMediaFile(
                 mediaSource: source,
-                body: media.filename ?? media.body,
+                filename: media.filename ?? media.body,
                 mimeType: media.mimeType ?? "application/octet-stream",
                 useCache: true,
                 tempDir: self.roomCacheDirectory(for: item.roomID).path
@@ -511,7 +511,7 @@ public actor MatrixMediaCache {
             return source
         }
         if !media.sourceURL.isEmpty {
-            return mediaSourceFromUrl(url: media.sourceURL)
+            return try MediaSource.fromUrl(url: media.sourceURL)
         }
         throw MediaCacheError.invalidMedia
     }

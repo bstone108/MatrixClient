@@ -133,7 +133,7 @@ final class StoredSessionStore: NSObject, ClientSessionDelegate, @unchecked Send
             userId: credentials.userID,
             deviceId: credentials.deviceID,
             homeserverUrl: credentials.homeserverURL,
-            oidcData: credentials.oidcData,
+            oauthData: credentials.oidcData,
             slidingSyncVersion: slidingSyncVersion(from: credentials.slidingSyncVersion)
         )
     }
@@ -145,7 +145,7 @@ final class StoredSessionStore: NSObject, ClientSessionDelegate, @unchecked Send
             userID: session.userId,
             deviceID: session.deviceId,
             homeserverURL: session.homeserverUrl,
-            oidcData: session.oidcData,
+            oidcData: session.oauthData,
             slidingSyncVersion: stringValue(for: session.slidingSyncVersion)
         )
         let data = try encoder.encode(payload)
@@ -185,18 +185,12 @@ final class StoredSessionStore: NSObject, ClientSessionDelegate, @unchecked Send
         switch version {
         case .none:
             return "none"
-        case let .proxy(url):
-            return "proxy:\(url)"
         case .native:
             return "native"
         }
     }
 
     private func slidingSyncVersion(from rawValue: String) -> SlidingSyncVersion {
-        if let url = rawValue.split(separator: ":", maxSplits: 1).dropFirst().first, rawValue.hasPrefix("proxy:") {
-            return .proxy(url: String(url))
-        }
-
         switch rawValue {
         case "native":
             return .native

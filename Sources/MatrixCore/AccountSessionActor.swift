@@ -43,6 +43,12 @@ private final class RoomListServiceSyncIndicatorListenerProxy: RoomListServiceSy
     }
 }
 
+private final class ClassicSyncListenerProxy: SyncListenerV2, @unchecked Sendable {
+    private let handler: @Sendable (SyncResponseV2) -> Void
+    init(handler: @escaping @Sendable (SyncResponseV2) -> Void) { self.handler = handler }
+    func onUpdate(response: SyncResponseV2) { handler(response) }
+}
+
 private final class TimelineListenerProxy: TimelineListener {
     private let handler: @Sendable ([MatrixRustSDK.TimelineDiff]) -> Void
 
@@ -95,6 +101,8 @@ private final class VerificationControllerDelegateProxy: SessionVerificationCont
         let onAccept = self.onAccept
         Task { await onAccept() }
     }
+
+    func didReceiveVerificationRequest(details _: SessionVerificationRequestDetails) {}
 
     func didStartSasVerification() {
         let onStartSas = self.onStartSas
@@ -206,6 +214,7 @@ private struct SpaceHierarchyRoom: Decodable, Sendable {
 }
 
 public actor AccountSessionActor {
+    private enum SyncTransport { case sliding, classicV2 }
     private enum Constants {
         static let backgroundSweepInterval: Duration = .seconds(30)
         static let backgroundRoomTimelineLimit = 64
@@ -218,6 +227,7 @@ public actor AccountSessionActor {
 
     private let diagnostics: DiagnosticsService
     private let client: Client
+    private let syncTransport: SyncTransport
     private let slidingSync = SlidingSyncCoordinator(spaces: [], rooms: [])
     private let timelineStore = TimelineStore()
     private let mediaCache: MatrixMediaCache
@@ -228,14 +238,18 @@ public actor AccountSessionActor {
     private let verificationBroadcaster = AsyncBroadcaster<VerificationSnapshot>()
 
     private var syncService: SyncService?
+    private var classicSyncListener: ClassicSyncListenerProxy?
+    private var classicSyncHandle: TaskHandle?
+    private var classicRooms: [RoomIdentifier: Room] = [:]
     private var roomListService: RoomListService?
     private var roomList: RoomList?
+    private var roomListDynamicEntries: RoomListEntriesWithDynamicAdaptersResult?
     private var roomListListener: RoomListEntriesListenerProxy?
     private var roomListHandle: TaskHandle?
     private var roomListSyncIndicatorListener: RoomListServiceSyncIndicatorListenerProxy?
     private var roomListSyncIndicatorHandle: TaskHandle?
-    private var roomItems: [RoomListItem] = []
-    private var roomItemsByID: [RoomIdentifier: RoomListItem] = [:]
+    private var roomItems: [Room] = []
+    private var roomItemsByID: [RoomIdentifier: Room] = [:]
     private var timelineSubscriptions: [RoomIdentifier: TimelineSubscription] = [:]
     private var roomInfoSubscriptions: [RoomIdentifier: RoomInfoSubscription] = [:]
     private var sdkTimelineItemsByRoom: [RoomIdentifier: [TimelineItem]] = [:]
@@ -259,9 +273,10 @@ public actor AccountSessionActor {
     private var verificationSnapshot: VerificationSnapshot
     private var bootstrapped = false
 
-    private init(summary: AccountSummary, client: Client, diagnostics: DiagnosticsService, cacheRootURL: URL, database: AppDatabase) {
+    private init(summary: AccountSummary, client: Client, syncTransport: SyncTransport, diagnostics: DiagnosticsService, cacheRootURL: URL, database: AppDatabase) {
         self.summary = summary
         self.client = client
+        self.syncTransport = syncTransport
         self.diagnostics = diagnostics
         self.mediaCache = MatrixMediaCache(
             client: client,
@@ -313,9 +328,6 @@ public actor AccountSessionActor {
 
         let client = try await builder.build()
         let loginDetails = await client.homeserverLoginDetails()
-        guard loginDetails.slidingSyncVersion() == .native else {
-            throw LiveMatrixSessionError.unsupportedSlidingSync
-        }
         guard loginDetails.supportsPasswordLogin() else {
             throw LiveMatrixSessionError.passwordLoginUnsupported
         }
@@ -339,6 +351,7 @@ public actor AccountSessionActor {
         return AccountSessionActor(
             summary: summary,
             client: client,
+            syncTransport: loginDetails.slidingSyncVersion() == .native ? .sliding : .classicV2,
             diagnostics: diagnostics,
             cacheRootURL: cacheRootURL(for: summary.accountID, applicationSupportURL: applicationSupportURL),
             database: database
@@ -359,12 +372,13 @@ public actor AccountSessionActor {
             .homeserverUrl(url: persistedSession.homeserverURL)
             .sessionPaths(dataPath: paths.dataPath, cachePath: paths.cachePath)
             .setSessionDelegate(sessionDelegate: sessionStore)
-            .slidingSyncVersionBuilder(versionBuilder: .native)
+            .slidingSyncVersionBuilder(versionBuilder: .discoverNative)
             .userAgent(userAgent: "MatrixClient/0.1")
 
         let client = try await builder.build()
         try await client.restoreSession(session: session)
         let summary = try await accountSummary(for: client)
+        let loginDetails = await client.homeserverLoginDetails()
         await diagnostics.record(.info, category: "Auth", message: "Restored homeserver session", metadata: [
             "userID": summary.userID,
             "homeserver": summary.homeserver.absoluteString
@@ -372,6 +386,7 @@ public actor AccountSessionActor {
         return AccountSessionActor(
             summary: summary,
             client: client,
+            syncTransport: loginDetails.slidingSyncVersion() == .native ? .sliding : .classicV2,
             diagnostics: diagnostics,
             cacheRootURL: cacheRootURL(for: summary.accountID, applicationSupportURL: applicationSupportURL),
             database: database
@@ -384,6 +399,12 @@ public actor AccountSessionActor {
 
         let cachedRoomIDs = await restorePersistedRoomSummaries()
         await restorePersistedTimelinesIfNeeded(for: cachedRoomIDs)
+
+        if syncTransport == .classicV2 {
+            try await startClassicSync()
+            await setupVerification()
+            return
+        }
 
         let syncService = try await client.syncService().finish()
         let roomListService = syncService.roomListService()
@@ -399,7 +420,9 @@ public actor AccountSessionActor {
         self.roomListService = roomListService
         self.roomList = roomList
         self.roomListListener = listener
-        self.roomListHandle = roomList.entries(listener: listener)
+        let dynamicEntries = roomList.entriesWithDynamicAdapters(pageSize: 100, listener: listener)
+        self.roomListDynamicEntries = dynamicEntries
+        self.roomListHandle = dynamicEntries.entriesStream()
         let syncIndicatorListener = RoomListServiceSyncIndicatorListenerProxy { [weak self] indicator in
             Task {
                 await self?.handleRoomListSyncIndicator(indicator)
@@ -478,7 +501,7 @@ public actor AccountSessionActor {
     }
 
     public func requestVerification() async throws {
-        let controller = try await ensureVerificationController()
+        _ = try await ensureVerificationController()
         updateVerificationSnapshot { snapshot in
             snapshot.flow = .requested
             snapshot.emojis = []
@@ -486,7 +509,7 @@ public actor AccountSessionActor {
             snapshot.message = "Verification requested. Accept it on the other client, then start SAS."
         }
         do {
-            try await controller.requestVerification()
+            try await ensureVerificationController().requestDeviceVerification()
         } catch {
             handleVerificationFailure(error)
             throw error
@@ -553,6 +576,9 @@ public actor AccountSessionActor {
         if let cached = roomDetailsCache[roomID] {
             return cached
         }
+        if let room = classicRooms[roomID] {
+            return RoomDetails(roomID: roomID, displayName: room.displayName() ?? roomID.rawValue, topic: room.topic() ?? "", isEncrypted: await room.isEncrypted(), memberCount: Int(room.joinedMembersCount()), pinnedMessages: [])
+        }
         guard let roomItem = roomItemsByID[roomID] else { return nil }
         guard let details = await buildRoomDetails(from: roomItem) else { return nil }
         roomDetailsCache[roomID] = details
@@ -565,6 +591,12 @@ public actor AccountSessionActor {
     }
 
     public func sendMessage(_ body: String, roomID: RoomIdentifier) async throws {
+        if syncTransport == .classicV2 {
+            try await ensureTimelineSubscription(for: roomID)
+            guard let subscription = timelineSubscriptions[roomID] else { throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue) }
+            _ = try await subscription.timeline.send(msg: messageEventContentFromMarkdown(md: body))
+            return
+        }
         try await ensureTimelineSubscription(for: roomID)
         guard let subscription = timelineSubscriptions[roomID] else {
             throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue)
@@ -605,10 +637,13 @@ public actor AccountSessionActor {
 
         do {
             let room: Room
+            if let classicRoom = classicRooms[roomID] {
+                room = classicRoom
+            } else
             if let subscription = timelineSubscriptions[roomID] {
                 room = subscription.room
             } else if let roomItem = roomItemsByID[roomID] {
-                room = try roomItem.fullRoom()
+                room = roomItem
             } else {
                 throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue)
             }
@@ -634,6 +669,10 @@ public actor AccountSessionActor {
     public func shutdown(logoutRemote: Bool) async {
         backgroundRoomSweepTask?.cancel()
         backgroundRoomSweepTask = nil
+
+        classicSyncHandle?.cancel()
+        classicSyncHandle = nil
+        classicSyncListener = nil
 
         roomListHandle?.cancel()
         roomListHandle = nil
@@ -667,6 +706,7 @@ public actor AccountSessionActor {
 
         roomItems.removeAll()
         roomItemsByID.removeAll()
+        classicRooms.removeAll()
         sdkTimelineItemsByRoom.removeAll()
         displayTimelineItemsByRoom.removeAll()
         roomDetailsCache.removeAll()
@@ -703,6 +743,59 @@ public actor AccountSessionActor {
                 "accountID": summary.accountID.rawValue,
                 "error": error.localizedDescription
             ])
+        }
+    }
+
+    private func startClassicSync() async throws {
+        let listener = ClassicSyncListenerProxy { [weak self] response in
+            Task { await self?.handleClassicSync(response) }
+        }
+        classicSyncListener = listener
+        let initialResponse = try await client.syncOnceV2(settings: SyncSettingsV2(fullState: true))
+        await handleClassicSync(initialResponse)
+        classicSyncHandle = client.syncV2(
+            settings: SyncSettingsV2(timeoutMs: 30_000),
+            listener: listener
+        )
+        await diagnostics.record(.info, category: "Sync", message: "Started classic /sync service", metadata: [
+            "userID": summary.userID
+        ])
+    }
+
+    private func handleClassicSync(_: SyncResponseV2) async {
+        let rooms = client.rooms()
+        var summaries: [RoomSummary] = []
+        var updatedRooms: [RoomIdentifier: Room] = [:]
+        for room in rooms {
+            let roomID = RoomIdentifier(rawValue: room.id())
+            updatedRooms[roomID] = room
+            let isSpace = room.isSpace()
+            let timelineItems = displayTimelineItemsByRoom[roomID] ?? []
+            let latest = timelineItems.last
+            summaries.append(RoomSummary(
+                roomID: roomID,
+                displayName: room.displayName() ?? room.canonicalAlias() ?? roomID.rawValue,
+                topic: room.topic() ?? "",
+                lastMessagePreview: latest.map(roomPreviewText(for:)) ?? (isSpace ? "Space" : ""),
+                timestamp: latest?.timestamp ?? .distantPast,
+                unreadCount: 0,
+                highlightCount: 0,
+                isDirect: await room.isDirect(),
+                isEncrypted: await room.isEncrypted(),
+                lastSenderDisplayName: latest?.senderDisplayName ?? "",
+                canonicalAlias: room.canonicalAlias(),
+                roomKind: isSpace ? .space : .room
+            ))
+        }
+        classicRooms = updatedRooms
+        await slidingSync.replace(spaces: [], rooms: summaries.sorted { $0.timestamp > $1.timestamp })
+        await persistCurrentRoomSummarySnapshot()
+        for roomID in updatedRooms.keys {
+            do {
+                try await ensureTimelineSubscription(for: roomID)
+            } catch {
+                await diagnostics.record(.error, category: "Timeline", message: "Unable to initialize classic-sync room timeline", metadata: ["roomID": roomID.rawValue, "error": error.localizedDescription])
+            }
         }
     }
 
@@ -951,27 +1044,29 @@ public actor AccountSessionActor {
             return
         }
 
-        guard let roomListService else {
-            throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue)
+        if syncTransport == .classicV2 {
+            let resolvedRoom = try client.getRoom(roomId: roomID.rawValue)
+            guard let room = classicRooms[roomID] ?? resolvedRoom else { throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue) }
+            classicRooms[roomID] = room
+            room.enableSendQueue(enable: true)
+            let timeline = try await room.timeline()
+            let listener = TimelineListenerProxy { [weak self] diff in Task { await self?.handleTimelineDiff(diff, roomID: roomID, room: room, timeline: timeline) } }
+            let handle = await timeline.addListener(listener: listener)
+            timelineSubscriptions[roomID] = TimelineSubscription(room: room, timeline: timeline, listener: listener, handle: handle)
+            return
         }
+        guard let roomListService else { throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue) }
 
-        let roomItem: RoomListItem
+        let roomItem: Room
         if let existing = roomItemsByID[roomID] {
             roomItem = existing
         } else {
             roomItem = try roomListService.room(roomId: roomID.rawValue)
         }
-        try roomListService.subscribeToRooms(
-            roomIds: [roomID.rawValue],
-            settings: roomSubscription(timelineLimit: Constants.activeRoomTimelineLimit)
-        )
+        try await roomListService.subscribeToRooms(roomIds: [roomID.rawValue])
         backgroundSubscribedRoomIDs.insert(roomID)
 
-        if !roomItem.isTimelineInitialized() {
-            try await roomItem.initTimeline(eventTypeFilter: nil, internalIdPrefix: nil)
-        }
-
-        let room = try roomItem.fullRoom()
+        let room = roomItem
         room.enableSendQueue(enable: true)
         let timeline = try await room.timeline()
         let listener = TimelineListenerProxy { [weak self] diff in
@@ -993,33 +1088,31 @@ public actor AccountSessionActor {
         let previousItems = displayTimelineItemsByRoom[roomID, default: []]
 
         for diff in diffs {
-            switch diff.change() {
-            case .append:
-                let incoming = await convert(items: diff.append() ?? [], roomID: roomID, room: room)
+            switch diff {
+            case let .append(values):
+                let incoming = await convert(items: values, roomID: roomID, room: room)
                 sdkItems.append(contentsOf: mergeIncomingTimelineItems(incoming, existingItems: sdkItems))
             case .clear:
                 sdkItems.removeAll()
-            case .insert:
-                if let insert = diff.insert(), let item = await convert(item: insert.item, roomID: roomID, room: room) {
+            case let .insert(index, value):
+                if let item = await convert(item: value, roomID: roomID, room: room) {
                     let merged = mergeIncomingTimelineItem(item, existingItems: sdkItems)
-                    sdkItems.insert(merged, at: min(Int(insert.index), sdkItems.count))
+                    sdkItems.insert(merged, at: min(Int(index), sdkItems.count))
                 }
-            case .set:
-                if let set = diff.set(),
-                   sdkItems.indices.contains(Int(set.index)),
-                   let item = await convert(item: set.item, roomID: roomID, room: room) {
-                    sdkItems[Int(set.index)] = mergeIncomingTimelineItem(item, existingItems: sdkItems)
+            case let .set(index, value):
+                if sdkItems.indices.contains(Int(index)), let item = await convert(item: value, roomID: roomID, room: room) {
+                    sdkItems[Int(index)] = mergeIncomingTimelineItem(item, existingItems: sdkItems)
                 }
-            case .remove:
-                if let index = diff.remove(), sdkItems.indices.contains(Int(index)) {
+            case let .remove(index):
+                if sdkItems.indices.contains(Int(index)) {
                     sdkItems.remove(at: Int(index))
                 }
-            case .pushBack:
-                if let item = diff.pushBack(), let converted = await convert(item: item, roomID: roomID, room: room) {
+            case let .pushBack(value):
+                if let converted = await convert(item: value, roomID: roomID, room: room) {
                     sdkItems.append(mergeIncomingTimelineItem(converted, existingItems: sdkItems))
                 }
-            case .pushFront:
-                if let item = diff.pushFront(), let converted = await convert(item: item, roomID: roomID, room: room) {
+            case let .pushFront(value):
+                if let converted = await convert(item: value, roomID: roomID, room: room) {
                     sdkItems.insert(mergeIncomingTimelineItem(converted, existingItems: sdkItems), at: 0)
                 }
             case .popBack:
@@ -1028,12 +1121,10 @@ public actor AccountSessionActor {
                 if !sdkItems.isEmpty {
                     sdkItems.removeFirst()
                 }
-            case .truncate:
-                if let length = diff.truncate() {
-                    sdkItems = Array(sdkItems.prefix(Int(length)))
-                }
-            case .reset:
-                let incoming = await convert(items: diff.reset() ?? [], roomID: roomID, room: room)
+            case let .truncate(length):
+                sdkItems = Array(sdkItems.prefix(Int(length)))
+            case let .reset(values):
+                let incoming = await convert(items: values, roomID: roomID, room: room)
                 sdkItems = mergeResetTimelineItems(incoming, existingItems: sdkItems)
             }
         }
@@ -1188,66 +1279,10 @@ public actor AccountSessionActor {
         room: Room,
         timeline: Timeline
     ) async -> TimelineItem? {
-        let refreshedFromTimeline: EventTimelineItem?
-        if let transactionID = item.transactionID {
-            refreshedFromTimeline = try? await timeline.getEventTimelineItemByTransactionId(transactionId: transactionID.rawValue)
-        } else {
-            refreshedFromTimeline = nil
-        }
-        let eventID = refreshedFromTimeline?.eventId()
-        let rawReceipts = refreshedFromTimeline?.readReceipts() ?? [:]
-        let receipts: ReceiptSummary
-        if !rawReceipts.isEmpty {
-            receipts = await mapReceipts(rawReceipts, roomID: roomID, room: room)
-        } else {
-            receipts = item.receipts
-        }
-
-        var deliveryState = MessageDeliveryState.reconciled(
-            mappedState: mapDeliveryState(refreshedFromTimeline?.localSendState()),
-            isOwnMessage: true,
-            eventID: eventID,
-            hasReadReceipts: !receipts.readReceipts.isEmpty
-        )
-
-        var resolvedEventID = eventID
-        if resolvedEventID == nil || deliveryState == .queued || deliveryState == .sending {
-            if let heuristicEventID = await latestRemoteEchoFallback(for: item, roomID: roomID, items: items) {
-                resolvedEventID = heuristicEventID
-                deliveryState = MessageDeliveryState.reconciled(
-                    mappedState: .accepted,
-                    isOwnMessage: true,
-                    eventID: heuristicEventID,
-                    hasReadReceipts: !receipts.readReceipts.isEmpty
-                )
-            }
-        }
-
-        guard resolvedEventID != nil || deliveryState != item.deliveryState || receipts != item.receipts else {
-            return nil
-        }
-
-        return TimelineItem(
-            id: resolvedEventID ?? item.id,
-            roomID: item.roomID,
-            senderID: item.senderID,
-            senderDisplayName: item.senderDisplayName,
-            body: item.body,
-            timestamp: item.timestamp,
-            kind: item.kind,
-            media: item.media,
-            status: item.status,
-            isOwnMessage: item.isOwnMessage,
-            isEncrypted: item.isEncrypted,
-            isEdited: item.isEdited,
-            replyPreview: item.replyPreview,
-            threadReplyCount: item.threadReplyCount,
-            deliveryState: deliveryState,
-            receipts: receipts,
-            transactionID: item.transactionID,
-            isDeleted: item.isDeleted,
-            deletedAt: item.deletedAt
-        )
+        // The current SDK no longer offers a transaction-ID lookup on Timeline.
+        // Timeline diffs provide the authoritative local-echo transition instead.
+        _ = (roomID, items, room, timeline)
+        return nil
     }
 
     private func requiresPendingDeliveryMonitoring(_ item: TimelineItem) -> Bool {
@@ -1280,24 +1315,7 @@ public actor AccountSessionActor {
             return displayMatch.id
         }
 
-        guard let latestEvent = await roomItemsByID[roomID]?.latestEvent(),
-              latestEvent.sender() == summary.userID,
-              let eventID = latestEvent.eventId() else {
-            return nil
-        }
-
-        let latestTimestamp = Date(timeIntervalSince1970: Double(latestEvent.timestamp()) / 1_000)
-        guard abs(latestTimestamp.timeIntervalSince(item.timestamp)) <= 600 else {
-            return nil
-        }
-
-        let candidateBody = normalizedTimelineBody(messagePreview(for: latestEvent))
-        let pendingBody = normalizedTimelineBody(item.body)
-        guard !candidateBody.isEmpty, candidateBody == pendingBody else {
-            return nil
-        }
-
-        return eventID
+        return nil
     }
 
     private func matchingRemoteEcho(for pendingItem: TimelineItem, in items: [TimelineItem]) -> TimelineItem? {
@@ -1502,33 +1520,30 @@ public actor AccountSessionActor {
         }
     }
 
-    private func buildRoomSummary(from roomItem: RoomListItem) async -> RoomSummary? {
+    private func buildRoomSummary(from roomItem: Room) async -> RoomSummary? {
         let roomID = RoomIdentifier(rawValue: roomItem.id())
         let roomInfo = try? await roomItem.roomInfo()
-        let isSpaceRoom = roomInfo?.isSpace ?? false
-        let latestEvent = await roomItem.latestEvent()
-        let topic = roomInfo?.topic ?? ""
+        let isSpaceRoom = roomItem.isSpace()
+        let topic = roomItem.topic() ?? ""
         var notificationCount = roomInfo.map { Int(max($0.notificationCount, $0.numUnreadMessages)) } ?? 0
         var highlightCount = roomInfo.map { Int(max($0.highlightCount, $0.numUnreadMentions)) } ?? 0
-        let isDirect = roomInfo?.isDirect ?? roomItem.isDirect()
-        let displayName = roomInfo?.displayName ?? roomItem.displayName() ?? roomItem.canonicalAlias() ?? roomID.rawValue
+        let isDirect = await roomItem.isDirect()
+        let displayName = roomItem.displayName() ?? roomItem.canonicalAlias() ?? roomID.rawValue
         let cachedLatest = latestTimelineItem(for: roomID)
         let fallbackPreview = isSpaceRoom ? (topic.isEmpty ? "Space" : topic) : topic
         let preview = cachedLatest.map(roomPreviewText(for:)) ??
-            latestEvent.flatMap { event in messagePreview(for: event) } ??
             fallbackPreview
         let timestamp = cachedLatest?.timestamp
-            ?? latestEvent.map { Date(timeIntervalSince1970: Double($0.timestamp()) / 1_000) }
             ?? .distantPast
-        let lastSenderDisplayName = cachedLatest?.senderDisplayName ?? latestEvent.map { senderDisplayName(forEvent: $0) } ?? displayName
+        let lastSenderDisplayName = cachedLatest?.senderDisplayName ?? displayName
         let isEncrypted = await roomItem.isEncrypted()
-        let latestEventID = latestEvent?.eventId()
-        let membership = mapRoomMembership(roomInfo?.membership ?? roomItem.membership())
+        let latestEventID = cachedLatest?.id
+        let membership = mapRoomMembership(roomItem.membership())
 
         if let override = readMarkerOverridesByRoom[roomID] {
             if notificationCount == 0 && highlightCount == 0 {
                 readMarkerOverridesByRoom[roomID] = nil
-            } else if latestEventID == override.eventID || latestEvent?.sender() == summary.userID {
+            } else if latestEventID == override.eventID {
                 notificationCount = 0
                 highlightCount = 0
             } else {
@@ -1805,6 +1820,8 @@ public actor AccountSessionActor {
             return .invited
         case .left:
             return .left
+        case .knocked, .banned:
+            return .notJoined
         }
     }
 
@@ -1858,18 +1875,19 @@ public actor AccountSessionActor {
         let canJoin: Bool
 
         if let preview {
-            if preview.isJoined {
+            let info = preview.info()
+            if info.membership == .joined {
                 membership = .joined
-            } else if preview.isInvited {
+            } else if info.membership == .invited {
                 membership = .invited
             } else {
                 membership = .notJoined
             }
-            displayName = preview.name ?? preview.canonicalAlias ?? roomID.rawValue
-            topic = preview.topic ?? ""
-            canonicalAlias = preview.canonicalAlias
-            isPublic = preview.isPublic
-            canJoin = membership != .left && (preview.isInvited || preview.isPublic || preview.canKnock)
+            displayName = info.name ?? info.canonicalAlias ?? roomID.rawValue
+            topic = info.topic ?? ""
+            canonicalAlias = info.canonicalAlias
+            isPublic = info.joinRule == .public
+            canJoin = membership != .left && (membership == .invited || isPublic || info.joinRule == .knock)
         } else {
             membership = .notJoined
             displayName = roomID.rawValue
@@ -1926,10 +1944,11 @@ public actor AccountSessionActor {
 
         let viaServers = summary.homeserver.host.map { [$0] } ?? []
         if let preview = try? await client.getRoomPreviewFromRoomId(roomId: roomID.rawValue, viaServers: viaServers) {
+            let info = preview.info()
             let membership: RoomMembership
-            if preview.isJoined {
+            if info.membership == .joined {
                 membership = .joined
-            } else if preview.isInvited {
+            } else if info.membership == .invited {
                 membership = .invited
             } else {
                 membership = .notJoined
@@ -1937,21 +1956,21 @@ public actor AccountSessionActor {
 
             return RoomSummary(
                 roomID: roomID,
-                displayName: preview.name ?? preview.canonicalAlias ?? roomID.rawValue,
-                topic: preview.topic ?? "",
-                lastMessagePreview: (preview.topic ?? "").isEmpty ? "Space" : (preview.topic ?? ""),
+                displayName: info.name ?? info.canonicalAlias ?? roomID.rawValue,
+                topic: info.topic ?? "",
+                lastMessagePreview: (info.topic ?? "").isEmpty ? "Space" : (info.topic ?? ""),
                 timestamp: .distantPast,
                 unreadCount: 0,
                 highlightCount: 0,
                 isDirect: false,
                 isEncrypted: false,
-                lastSenderDisplayName: preview.name ?? preview.canonicalAlias ?? roomID.rawValue,
-                canonicalAlias: preview.canonicalAlias,
+                lastSenderDisplayName: info.name ?? info.canonicalAlias ?? roomID.rawValue,
+                canonicalAlias: info.canonicalAlias,
                 roomKind: .space,
                 membership: membership,
                 spaceIDs: [],
-                isPublic: preview.isPublic,
-                canJoin: membership != .left && (preview.isInvited || preview.isPublic || preview.canKnock)
+                isPublic: info.joinRule == .public,
+                canJoin: membership != .left && (membership == .invited || info.joinRule == .public || info.joinRule == .knock)
             )
         }
 
@@ -1976,7 +1995,7 @@ public actor AccountSessionActor {
     }
 
     private func updateSpaceRelationshipsIfNeeded(content: TimelineItemContent, roomID: RoomIdentifier) async {
-        guard case let .state(stateKey, otherState) = content.kind() else { return }
+        guard case let .state(stateKey, otherState) = content else { return }
 
         switch otherState {
         case .spaceParent:
@@ -2091,10 +2110,7 @@ public actor AccountSessionActor {
             return cached
         }
 
-        guard let roomItem = roomItemsByID[roomID], let latestEvent = await roomItem.latestEvent() else {
-            return nil
-        }
-        return latestEvent.eventId()
+        return nil
     }
 
     private func clearUnreadCounts(for roomID: RoomIdentifier) async {
@@ -2134,7 +2150,7 @@ public actor AccountSessionActor {
         return "\(preview) [Deleted]"
     }
 
-    private func buildRoomDetails(from roomItem: RoomListItem) async -> RoomDetails? {
+    private func buildRoomDetails(from roomItem: Room) async -> RoomDetails? {
         guard let roomInfo = try? await roomItem.roomInfo() else { return nil }
         if roomInfo.isSpace {
             return nil
@@ -2170,38 +2186,38 @@ public actor AccountSessionActor {
 
     private func convert(item: MatrixRustSDK.TimelineItem, roomID: RoomIdentifier, room: Room) async -> TimelineItem? {
         guard let event = item.asEvent() else { return nil }
-        let content = event.content()
+        let content = event.content
         await updateSpaceRelationshipsIfNeeded(content: content, roomID: roomID)
-        let message = content.asMessage()
+        let message = messageContent(from: content)
         let status = timelineStatusDetails(for: content)
         let media = message.flatMap(timelineMediaAttachment(for:))
-        let senderID = event.sender()
-        let timestamp = Date(timeIntervalSince1970: Double(event.timestamp()) / 1_000)
-        let remoteEventID = event.eventId()
-        let eventID = remoteEventID ?? item.uniqueId()
-        let transactionID = event.transactionId().map(EventTransactionIdentifier.init(rawValue:))
-        let rawReceipts = event.readReceipts()
+        let senderID = event.sender
+        let timestamp = Date(timeIntervalSince1970: Double(event.timestamp) / 1_000)
+        let remoteEventID: String? = if case let .eventId(eventID) = event.eventOrTransactionId { eventID } else { nil }
+        let eventID: String = if case let .eventId(eventID) = event.eventOrTransactionId { eventID } else if case let .transactionId(transactionID) = event.eventOrTransactionId { transactionID } else { item.uniqueId().id }
+        let transactionID: EventTransactionIdentifier? = if case let .transactionId(value) = event.eventOrTransactionId { EventTransactionIdentifier(rawValue: value) } else { nil }
+        let rawReceipts = event.readReceipts
         let receipts: ReceiptSummary
-        if event.isOwn(), !rawReceipts.isEmpty {
+        if event.isOwn, !rawReceipts.isEmpty {
             receipts = await mapReceipts(rawReceipts, roomID: roomID, room: room)
         } else {
             receipts = ReceiptSummary(sentAt: nil, deliveredAt: nil, readReceipts: [])
         }
         let deliveryState = MessageDeliveryState.reconciled(
-            mappedState: mapDeliveryState(event.localSendState()),
-            isOwnMessage: event.isOwn(),
+            mappedState: mapDeliveryState(event.localSendState),
+            isOwnMessage: event.isOwn,
             eventID: remoteEventID,
             hasReadReceipts: !receipts.readReceipts.isEmpty
         )
         let replyPreviewText: String?
-        if let replyDetails = message?.inReplyTo() {
+        if let replyDetails = messageLikeContent(from: content)?.inReplyTo {
             replyPreviewText = replyPreview(for: replyDetails)
         } else {
             replyPreviewText = nil
         }
-        let isEncrypted = (try? room.isEncrypted()) ?? false
+        let isEncrypted = await room.isEncrypted()
         let isDeleted: Bool
-        if case .redactedMessage = content.kind() {
+        if case let .msgLike(msgLike) = content, case .redacted = msgLike.kind {
             isDeleted = true
         } else {
             isDeleted = false
@@ -2217,11 +2233,11 @@ public actor AccountSessionActor {
             kind: status == nil ? .message : .statusSummary,
             media: media,
             status: status,
-            isOwnMessage: event.isOwn(),
+            isOwnMessage: event.isOwn,
             isEncrypted: isEncrypted,
-            isEdited: message?.isEdited() ?? false,
+            isEdited: message?.isEdited ?? false,
             replyPreview: replyPreviewText,
-            threadReplyCount: message?.isThreaded() == true ? 1 : 0,
+            threadReplyCount: messageLikeContent(from: content)?.threadRoot == nil ? 0 : 1,
             deliveryState: deliveryState,
             receipts: receipts,
             transactionID: transactionID,
@@ -2232,7 +2248,7 @@ public actor AccountSessionActor {
 
     private func timelineBody(
         for content: TimelineItemContent,
-        message: Message?,
+        message: MessageContent?,
         status: TimelineStatusDetails?,
         media: TimelineMediaAttachment?
     ) -> String {
@@ -2245,23 +2261,30 @@ public actor AccountSessionActor {
         }
 
         if let message {
-            return message.body()
+            return message.body
         }
 
-        switch content.kind() {
-        case .redactedMessage:
-            return "Message removed"
-        case let .sticker(body, _, _):
-            return body
-        case let .poll(question, _, _, _, _, _, _):
-            return question
+        switch content {
+        case let .msgLike(msgLike):
+            switch msgLike.kind {
+            case .redacted:
+                return "Message removed"
+            case let .sticker(body, _, _):
+                return body
+            case let .poll(question, _, _, _, _, _, _):
+                return question
+            case .unableToDecrypt:
+                return "Unable to decrypt message"
+            case .message:
+                return ""
+            case .other, .liveLocation:
+                return "Unsupported event"
+            }
         case .callInvite:
             return "Call invite"
-        case .callNotify:
+        case .rtcNotification:
             return "Call update"
-        case .unableToDecrypt:
-            return "Unable to decrypt message"
-        case let .roomMembership(userId, userDisplayName, change):
+        case let .roomMembership(userId, userDisplayName, change, _):
             return membershipPreview(userID: userId, displayName: userDisplayName ?? userId, change: change)
         case let .profileChange(displayName, _, _, _):
             return displayName.map { "Profile changed: \($0)" } ?? "Profile changed"
@@ -2271,12 +2294,20 @@ public actor AccountSessionActor {
             return "Unsupported event: \(eventType)"
         case let .failedToParseState(eventType, _, _):
             return "Unsupported state: \(eventType)"
-        case .message:
-            return ""
         }
     }
 
-    private func previewText(for content: TimelineItemContent, message: Message?) -> String {
+    private func messageLikeContent(from content: TimelineItemContent) -> MsgLikeContent? {
+        guard case let .msgLike(value) = content else { return nil }
+        return value
+    }
+
+    private func messageContent(from content: TimelineItemContent) -> MessageContent? {
+        guard let messageLike = messageLikeContent(from: content), case let .message(value) = messageLike.kind else { return nil }
+        return value
+    }
+
+    private func previewText(for content: TimelineItemContent, message: MessageContent?) -> String {
         if let status = timelineStatusDetails(for: content) {
             return status.renderedText
         }
@@ -2287,7 +2318,7 @@ public actor AccountSessionActor {
     }
 
     private func timelineStatusDetails(for content: TimelineItemContent) -> TimelineStatusDetails? {
-        guard case let .roomMembership(userID, userDisplayName, change) = content.kind() else {
+        guard case let .roomMembership(userID, userDisplayName, change, _) = content else {
             return nil
         }
         let displayName = userDisplayName ?? userID
@@ -2343,12 +2374,12 @@ public actor AccountSessionActor {
         return "\(name) \(mapMembershipAction(change).verbPhrase)"
     }
 
-    private func timelineMediaAttachment(for message: Message) -> TimelineMediaAttachment? {
-        switch message.msgtype() {
+    private func timelineMediaAttachment(for message: MessageContent) -> TimelineMediaAttachment? {
+        switch message.msgType {
         case let .image(content):
             return TimelineMediaAttachment(
                 kind: .image,
-                body: content.body,
+                body: content.caption ?? content.filename,
                 filename: content.filename,
                 sourceURL: content.source.url(),
                 sourceJSON: content.source.toJson(),
@@ -2363,7 +2394,7 @@ public actor AccountSessionActor {
         case let .video(content):
             return TimelineMediaAttachment(
                 kind: .video,
-                body: content.body,
+                body: content.caption ?? content.filename,
                 filename: content.filename,
                 sourceURL: content.source.url(),
                 sourceJSON: content.source.toJson(),
@@ -2379,7 +2410,7 @@ public actor AccountSessionActor {
         case let .audio(content):
             return TimelineMediaAttachment(
                 kind: .audio,
-                body: content.body,
+                body: content.caption ?? content.filename,
                 filename: content.filename,
                 sourceURL: content.source.url(),
                 sourceJSON: content.source.toJson(),
@@ -2390,7 +2421,7 @@ public actor AccountSessionActor {
         case let .file(content):
             return TimelineMediaAttachment(
                 kind: .file,
-                body: content.body,
+                body: content.caption ?? content.filename,
                 filename: content.filename,
                 sourceURL: content.source.url(),
                 sourceJSON: content.source.toJson(),
@@ -2400,13 +2431,14 @@ public actor AccountSessionActor {
                 thumbnailMimeType: content.info?.thumbnailInfo?.mimetype,
                 allowsDirectDownload: allowsDirectDownload(for: content.source)
             )
-        case .text, .notice, .emote, .location, .other:
+        case .text, .notice, .emote, .location, .other, .gallery:
             return nil
         }
     }
 
     private func allowsDirectDownload(for source: MediaSource) -> Bool {
-        source.toJson() == mediaSourceFromUrl(url: source.url()).toJson()
+        guard let unencryptedSource = try? MediaSource.fromUrl(url: source.url()) else { return false }
+        return source.toJson() == unencryptedSource.toJson()
     }
 
     private func mediaDisplayBody(for media: TimelineMediaAttachment) -> String {
@@ -2447,12 +2479,12 @@ public actor AccountSessionActor {
     }
 
     private func senderDisplayName(forEvent event: EventTimelineItem) -> String {
-        senderDisplayName(for: event.senderProfile(), fallback: event.sender())
+        senderDisplayName(for: event.senderProfile, fallback: event.sender)
     }
 
     private func senderDisplayName(for profile: ProfileDetails, fallback: String) -> String {
         switch profile {
-        case let .ready(displayName, _, _):
+        case let .ready(displayName, _, _, _, _):
             return displayName ?? fallback
         case .pending, .unavailable, .error:
             return fallback
@@ -2460,15 +2492,15 @@ public actor AccountSessionActor {
     }
 
     private func messagePreview(for event: EventTimelineItem) -> String {
-        let content = event.content()
-        let message = content.asMessage()
+        let content = event.content
+        let message = messageContent(from: content)
         return previewText(for: content, message: message)
     }
 
     private func replyPreview(for details: InReplyToDetails) -> String? {
-        switch details.event {
-        case let .ready(content, sender, senderProfile):
-            let body = previewText(for: content, message: content.asMessage())
+        switch details.event() {
+        case let .ready(content, sender, senderProfile, _, _):
+            let body = previewText(for: content, message: messageContent(from: content))
             let name = senderDisplayName(for: senderProfile, fallback: sender)
             return "\(name): \(body)"
         case .pending:
@@ -2539,8 +2571,6 @@ public actor AccountSessionActor {
         switch state {
         case .notSentYet:
             return .sending
-        case .verifiedUserHasUnsignedDevice, .verifiedUserChangedIdentity:
-            return .queued
         case let .sendingFailed(_, isRecoverable):
             return isRecoverable ? .queued : .permanentFailure
         case .sent:
@@ -2694,21 +2724,6 @@ public actor AccountSessionActor {
         }
     }
 
-    private func roomSubscription(timelineLimit: Int) -> RoomSubscription {
-        RoomSubscription(
-            requiredState: [
-                RequiredState(key: "m.room.encryption", value: ""),
-                RequiredState(key: "m.room.name", value: ""),
-                RequiredState(key: "m.room.topic", value: ""),
-                RequiredState(key: "m.room.avatar", value: ""),
-                RequiredState(key: "m.space.parent", value: "*"),
-                RequiredState(key: "m.space.child", value: "*")
-            ],
-            timelineLimit: UInt32(timelineLimit),
-            includeHeroes: true
-        )
-    }
-
     private func subscribeToBackgroundRoomsIfNeeded(
         roomIDs: [RoomIdentifier],
         forceResubscribe: Bool,
@@ -2729,11 +2744,10 @@ public actor AccountSessionActor {
             return
         }
 
-        let settings = roomSubscription(timelineLimit: Constants.backgroundRoomTimelineLimit)
         for chunkStart in stride(from: 0, to: roomIDsToSubscribe.count, by: Constants.backgroundSubscriptionBatchSize) {
             let chunk = Array(roomIDsToSubscribe[chunkStart..<min(chunkStart + Constants.backgroundSubscriptionBatchSize, roomIDsToSubscribe.count)])
             do {
-                try roomListService.subscribeToRooms(roomIds: chunk.map(\.rawValue), settings: settings)
+                try await roomListService.subscribeToRooms(roomIds: chunk.map(\.rawValue))
                 backgroundSubscribedRoomIDs.formUnion(chunk)
             } catch {
                 await diagnostics.record(.error, category: "Sync", message: "Failed to subscribe background room batch", metadata: [
@@ -2774,7 +2788,7 @@ public actor AccountSessionActor {
 
     private func ensureBackgroundRoomInfoSubscriptions(for roomIDs: [RoomIdentifier]) async {
         for roomID in roomIDs where roomInfoSubscriptions[roomID] == nil {
-            let roomItem: RoomListItem
+            let roomItem: Room
             do {
                 if let existing = roomItemsByID[roomID] {
                     roomItem = existing
@@ -2784,7 +2798,7 @@ public actor AccountSessionActor {
                     continue
                 }
 
-                let room = try roomItem.fullRoom()
+                let room = roomItem
                 let listener = RoomInfoListenerProxy { [weak self] in
                     Task {
                         await self?.handleBackgroundRoomInfoUpdate(roomID: roomID)

@@ -68,7 +68,7 @@ public actor ReceiptAvatarCache {
 
     private func avatarData(for avatarURL: String) async throws -> Data {
         if avatarURL.hasPrefix("mxc://") {
-            let mediaSource = mediaSourceFromUrl(url: avatarURL)
+            let mediaSource = try MediaSource.fromUrl(url: avatarURL)
             let thumbnailData = try? await SDKMediaFetchGateCoordinator.shared.withExclusiveFetch(
                 scopeID: sdkMediaFetchScopeID,
                 priority: .avatar

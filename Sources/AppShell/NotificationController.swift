@@ -1,7 +1,7 @@
 import AppKit
 import Diagnostics
 import MatrixCore
-import UserNotifications
+@preconcurrency import UserNotifications
 
 final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     private actor StateSnapshot {
@@ -58,19 +58,19 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         syncStateSnapshot()
         state.addSessionObserver { [weak self] in
             self?.syncStateSnapshot()
-            Task { [weak self] in
+            Task { @MainActor [weak self] in
                 await self?.refreshAuthorizationIfNeeded()
             }
         }
         state.addSelectionObserver { [weak self] in
             self?.syncStateSnapshot()
         }
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             await self?.refreshAuthorizationIfNeeded()
         }
 
         streamTask?.cancel()
-        streamTask = Task { [weak self] in
+        streamTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let stream = await matrixClient.notificationEventStream()
             for await event in stream {
@@ -184,3 +184,5 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         return options
     }
 }
+
+extension NotificationController: @unchecked Sendable {}
