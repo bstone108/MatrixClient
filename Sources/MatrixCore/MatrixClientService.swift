@@ -374,8 +374,6 @@ public actor MatrixClientService: MatrixClientFacade {
             database: database,
             diagnostics: diagnostics
         )
-        try await session.bootstrapIfNeeded()
-
         if let existing = sessions[session.summary.accountID] {
             sessionNotificationTasks[session.summary.accountID]?.cancel()
             sessionNotificationTasks.removeValue(forKey: session.summary.accountID)
@@ -387,6 +385,17 @@ public actor MatrixClientService: MatrixClientFacade {
         if !accountOrder.contains(session.summary.accountID) {
             accountOrder.append(session.summary.accountID)
             accountOrder.sort { $0.rawValue < $1.rawValue }
+        }
+
+        Task { [diagnostics] in
+            do {
+                try await session.bootstrapIfNeeded()
+            } catch {
+                await diagnostics.record(.error, category: "Sync", message: "Signed in, but initial synchronization failed", metadata: [
+                    "accountID": session.summary.accountID.rawValue,
+                    "error": error.localizedDescription
+                ])
+            }
         }
         return session
     }
