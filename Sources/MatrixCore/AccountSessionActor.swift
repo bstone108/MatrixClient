@@ -246,6 +246,8 @@ public actor AccountSessionActor {
     private enum SyncTransport { case sliding, classicV2 }
     private enum Constants {
         static let backgroundSweepInterval: Duration = .seconds(30)
+        static let classicSyncWatchdogInterval: Duration = .seconds(15)
+        static let classicSyncStaleAfter: TimeInterval = 75
         static let backgroundRoomTimelineLimit = 64
         static let activeRoomTimelineLimit = 500
         static let backgroundSubscriptionBatchSize = 64
@@ -271,6 +273,12 @@ public actor AccountSessionActor {
     private var slidingSyncFallbackTask: Task<Void, Never>?
     private var classicSyncListener: ClassicSyncListenerProxy?
     private var classicSyncHandle: TaskHandle?
+    private var classicSyncWatchdogTask: Task<Void, Never>?
+    private var classicSyncLastResponseAt: Date?
+    private var classicSyncGeneration = 0
+    private var classicSyncRestartInProgress = false
+    private var pendingClassicSyncResponse: SyncResponseV2?
+    private var processingClassicSyncResponses = false
     private var classicRooms: [RoomIdentifier: Room] = [:]
     /// Invalidates hierarchy work that was started by Sliding Sync before we
     /// switch transports.  Those requests can complete after classic `/sync`
@@ -767,6 +775,11 @@ public actor AccountSessionActor {
         classicSyncHandle?.cancel()
         classicSyncHandle = nil
         classicSyncListener = nil
+        classicSyncWatchdogTask?.cancel()
+        classicSyncWatchdogTask = nil
+        classicSyncLastResponseAt = nil
+        pendingClassicSyncResponse = nil
+        processingClassicSyncResponses = false
 
         roomListHandle?.cancel()
         roomListHandle = nil
@@ -843,19 +856,109 @@ public actor AccountSessionActor {
     }
 
     private func startClassicSync() async throws {
+        try await launchClassicSync(fullState: true, recoveryReason: nil)
+    }
+
+    private func launchClassicSync(fullState: Bool, recoveryReason: String?) async throws {
+        classicSyncGeneration += 1
+        let generation = classicSyncGeneration
         let listener = ClassicSyncListenerProxy { [weak self] response in
-            Task { await self?.handleClassicSync(response) }
+            Task { await self?.receiveClassicSync(response, generation: generation) }
         }
         classicSyncListener = listener
-        let initialResponse = try await client.syncOnceV2(settings: SyncSettingsV2(fullState: true))
-        await handleClassicSync(initialResponse)
+        let initialResponse = try await client.syncOnceV2(
+            settings: SyncSettingsV2(timeoutMs: 0, fullState: fullState)
+        )
+        classicSyncLastResponseAt = .now
         classicSyncHandle = client.syncV2(
             settings: SyncSettingsV2(timeoutMs: 30_000),
             listener: listener
         )
-        await diagnostics.record(.info, category: "Sync", message: "Started classic /sync service", metadata: [
-            "userID": summary.userID
+        startClassicSyncWatchdogIfNeeded()
+        await diagnostics.record(.info, category: "Sync", message: recoveryReason == nil ? "Started classic /sync service" : "Restarted classic /sync service", metadata: [
+            "userID": summary.userID,
+            "generation": "\(generation)",
+            "reason": recoveryReason ?? "initial"
         ])
+        await receiveClassicSync(initialResponse, generation: generation)
+    }
+
+    private func receiveClassicSync(_ response: SyncResponseV2, generation: Int) async {
+        guard generation == classicSyncGeneration else { return }
+        classicSyncLastResponseAt = .now
+        await diagnostics.record(.debug, category: "Sync", message: "Classic /sync response received", metadata: [
+            "generation": "\(generation)",
+            "joined": "\(response.rooms.joined.count)",
+            "invited": "\(response.rooms.invited.count)",
+            "knocked": "\(response.rooms.knocked.count)"
+        ])
+
+        // Room/space reconciliation is deliberately coalesced. It performs
+        // network-backed hierarchy discovery and can take longer than the
+        // server's sync cadence; queuing every intermediate response can
+        // otherwise leave the actor buried under stale reconciliation work.
+        pendingClassicSyncResponse = response
+        guard !processingClassicSyncResponses else { return }
+        processingClassicSyncResponses = true
+        defer { processingClassicSyncResponses = false }
+
+        while let pendingResponse = pendingClassicSyncResponse {
+            pendingClassicSyncResponse = nil
+            await handleClassicSync(pendingResponse)
+        }
+    }
+
+    private func startClassicSyncWatchdogIfNeeded() {
+        guard classicSyncWatchdogTask == nil else { return }
+        classicSyncWatchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Constants.classicSyncWatchdogInterval)
+                guard !Task.isCancelled else { return }
+                await self?.checkClassicSyncHealth()
+            }
+        }
+    }
+
+    private func checkClassicSyncHealth() async {
+        guard syncTransport == .classicV2, !classicSyncRestartInProgress else { return }
+        let handleFinished = classicSyncHandle?.isFinished() ?? true
+        let secondsSinceResponse = classicSyncLastResponseAt.map { Date().timeIntervalSince($0) }
+        guard handleFinished || (secondsSinceResponse ?? .infinity) >= Constants.classicSyncStaleAfter else { return }
+
+        let reason = ClassicSyncWatchdogPolicy.restartReason(
+            handleFinished: handleFinished,
+            secondsSinceLastResponse: secondsSinceResponse,
+            staleAfter: Constants.classicSyncStaleAfter
+        ) ?? "unhealthy"
+        await diagnostics.record(.error, category: "Sync", message: "Classic /sync watchdog detected a stalled loop", metadata: [
+            "generation": "\(classicSyncGeneration)",
+            "handleFinished": "\(handleFinished)",
+            "secondsSinceResponse": secondsSinceResponse.map { String(format: "%.1f", $0) } ?? "none",
+            "reason": reason
+        ])
+        await restartClassicSync(reason: reason)
+    }
+
+    private func restartClassicSync(reason: String) async {
+        guard !classicSyncRestartInProgress else { return }
+        classicSyncRestartInProgress = true
+        defer { classicSyncRestartInProgress = false }
+
+        classicSyncHandle?.cancel()
+        classicSyncHandle = nil
+        classicSyncListener = nil
+        do {
+            // The SDK retains the last sync token. A zero-timeout one-shot
+            // immediately catches up events missed while the loop was down,
+            // then a fresh long-poll loop resumes from that token.
+            try await launchClassicSync(fullState: false, recoveryReason: reason)
+        } catch {
+            await diagnostics.record(.error, category: "Sync", message: "Failed to restart classic /sync service", metadata: [
+                "generation": "\(classicSyncGeneration)",
+                "reason": reason,
+                "error": error.localizedDescription
+            ])
+        }
     }
 
     private func handleClassicSync(_ response: SyncResponseV2) async {
