@@ -213,6 +213,16 @@ private struct SpaceHierarchyRoom: Decodable, Sendable {
     }
 }
 
+private struct MatrixStateEvent: Decodable, Sendable {
+    let type: String
+    let stateKey: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case stateKey = "state_key"
+    }
+}
+
 public actor AccountSessionActor {
     private enum SyncTransport { case sliding, classicV2 }
     private enum Constants {
@@ -227,7 +237,7 @@ public actor AccountSessionActor {
 
     private let diagnostics: DiagnosticsService
     private let client: Client
-    private let syncTransport: SyncTransport
+    private var syncTransport: SyncTransport
     private let slidingSync = SlidingSyncCoordinator(spaces: [], rooms: [])
     private let timelineStore = TimelineStore()
     private let mediaCache: MatrixMediaCache
@@ -238,6 +248,7 @@ public actor AccountSessionActor {
     private let verificationBroadcaster = AsyncBroadcaster<VerificationSnapshot>()
 
     private var syncService: SyncService?
+    private var slidingSyncFallbackTask: Task<Void, Never>?
     private var classicSyncListener: ClassicSyncListenerProxy?
     private var classicSyncHandle: TaskHandle?
     private var classicRooms: [RoomIdentifier: Room] = [:]
@@ -331,6 +342,7 @@ public actor AccountSessionActor {
         guard loginDetails.supportsPasswordLogin() else {
             throw LiveMatrixSessionError.passwordLoginUnsupported
         }
+        let syncTransport = await preferredSyncTransport(for: client)
 
         try await client.login(
             username: username,
@@ -351,7 +363,7 @@ public actor AccountSessionActor {
         return AccountSessionActor(
             summary: summary,
             client: client,
-            syncTransport: loginDetails.slidingSyncVersion() == .native ? .sliding : .classicV2,
+            syncTransport: syncTransport,
             diagnostics: diagnostics,
             cacheRootURL: cacheRootURL(for: summary.accountID, applicationSupportURL: applicationSupportURL),
             database: database
@@ -378,7 +390,7 @@ public actor AccountSessionActor {
         let client = try await builder.build()
         try await client.restoreSession(session: session)
         let summary = try await accountSummary(for: client)
-        let loginDetails = await client.homeserverLoginDetails()
+        let syncTransport = await preferredSyncTransport(for: client)
         await diagnostics.record(.info, category: "Auth", message: "Restored homeserver session", metadata: [
             "userID": summary.userID,
             "homeserver": summary.homeserver.absoluteString
@@ -386,11 +398,16 @@ public actor AccountSessionActor {
         return AccountSessionActor(
             summary: summary,
             client: client,
-            syncTransport: loginDetails.slidingSyncVersion() == .native ? .sliding : .classicV2,
+            syncTransport: syncTransport,
             diagnostics: diagnostics,
             cacheRootURL: cacheRootURL(for: summary.accountID, applicationSupportURL: applicationSupportURL),
             database: database
         )
+    }
+
+    private static func preferredSyncTransport(for client: Client) async -> SyncTransport {
+        let availableVersions = await client.availableSlidingSyncVersions()
+        return availableVersions.contains(.native) ? .sliding : .classicV2
     }
 
     public func bootstrapIfNeeded() async throws {
@@ -444,6 +461,47 @@ public actor AccountSessionActor {
         await diagnostics.record(.info, category: "Sync", message: "Started Sliding Sync service", metadata: [
             "userID": summary.userID
         ])
+        scheduleSlidingSyncFallbackCheck()
+    }
+
+    private func scheduleSlidingSyncFallbackCheck() {
+        slidingSyncFallbackTask?.cancel()
+        slidingSyncFallbackTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(8))
+            await self?.fallBackToClassicSyncIfNeeded()
+        }
+    }
+
+    private func fallBackToClassicSyncIfNeeded() async {
+        guard syncTransport == .sliding else { return }
+        // A restored coordinator may still contain summaries from an earlier
+        // session. The SDK room-list adapter is the authoritative signal that
+        // this Sliding Sync connection is delivering usable entries.
+        guard roomItems.isEmpty, !client.rooms().isEmpty else { return }
+        guard let syncService else { return }
+
+        do {
+            // Some legacy homeservers leave the Sliding Sync stop request
+            // pending. Do not let that prevent the compatibility `/sync`
+            // transport from starting and rendering the room list.
+            Task {
+                await syncService.stop()
+            }
+            roomListHandle?.cancel()
+            roomListSyncIndicatorHandle?.cancel()
+            roomListHandle = nil
+            roomListSyncIndicatorHandle = nil
+            roomList = nil
+            roomListService = nil
+            self.syncService = nil
+            syncTransport = .classicV2
+            try await startClassicSync()
+            await diagnostics.record(.notice, category: "Sync", message: "Fell back to classic /sync after Sliding Sync produced no rooms", metadata: [
+                "cachedRoomCount": "\(client.rooms().count)"
+            ])
+        } catch {
+            await diagnostics.record(.error, category: "Sync", message: "Failed to fall back from Sliding Sync", metadata: ["error": error.localizedDescription])
+        }
     }
 
     public func spaces() async -> [SpaceSummary] {
@@ -669,6 +727,8 @@ public actor AccountSessionActor {
     public func shutdown(logoutRemote: Bool) async {
         backgroundRoomSweepTask?.cancel()
         backgroundRoomSweepTask = nil
+        slidingSyncFallbackTask?.cancel()
+        slidingSyncFallbackTask = nil
 
         classicSyncHandle?.cancel()
         classicSyncHandle = nil
@@ -695,7 +755,6 @@ public actor AccountSessionActor {
 
         for subscription in timelineSubscriptions.values {
             subscription.handle.cancel()
-            subscription.room.enableSendQueue(enable: false)
         }
         timelineSubscriptions.removeAll()
 
@@ -762,8 +821,23 @@ public actor AccountSessionActor {
         ])
     }
 
-    private func handleClassicSync(_: SyncResponseV2) async {
-        let rooms = client.rooms()
+    private func handleClassicSync(_ response: SyncResponseV2) async {
+        let cachedSpaceIDs = Set(
+            (await slidingSync.allKnownRoomSummaries())
+                .filter(\.isSpace)
+                .map { SpaceIdentifier(rawValue: $0.roomID.rawValue) }
+        )
+        let syncedRoomIDs = Set(
+            response.rooms.joined + response.rooms.invited + response.rooms.knocked
+        )
+        var roomsByID = Dictionary(uniqueKeysWithValues: client.rooms().map { ($0.id(), $0) })
+        for roomID in syncedRoomIDs where roomsByID[roomID] == nil {
+            if let room = try? client.getRoom(roomId: roomID) {
+                roomsByID[roomID] = room
+            }
+        }
+        let rooms = Array(roomsByID.values)
+        await discoverClassicSpaceMemberships(for: rooms)
         var summaries: [RoomSummary] = []
         var updatedRooms: [RoomIdentifier: Room] = [:]
         for room in rooms {
@@ -789,7 +863,28 @@ public actor AccountSessionActor {
         }
         classicRooms = updatedRooms
         await slidingSync.replace(spaces: [], rooms: summaries.sorted { $0.timestamp > $1.timestamp })
+        // Conduit can return the joined rooms through classic `/sync` before
+        // its local SDK space graph has been populated. Refresh the server's
+        // hierarchy for the known space rooms so children are placed under
+        // their spaces instead of remaining in the top-level list.
+        let discoveredSpaceIDs = summaries
+            .filter(\.isSpace)
+            .map { SpaceIdentifier(rawValue: $0.roomID.rawValue) }
+        let spaceService = await client.spaceService()
+        let sdkSpaceIDs = Set(
+            (await spaceService.topLevelJoinedSpaces())
+                .map { SpaceIdentifier(rawValue: $0.roomId) }
+        )
+        for spaceID in cachedSpaceIDs.union(discoveredSpaceIDs).union(sdkSpaceIDs) {
+            await refreshSpaceHierarchy(for: spaceID)
+        }
         await persistCurrentRoomSummarySnapshot()
+        await diagnostics.record(.info, category: "Sync", message: "Processed classic /sync room update", metadata: [
+            "joined": "\(response.rooms.joined.count)",
+            "invited": "\(response.rooms.invited.count)",
+            "knocked": "\(response.rooms.knocked.count)",
+            "resolved": "\(updatedRooms.count)"
+        ])
         for roomID in updatedRooms.keys {
             do {
                 try await ensureTimelineSubscription(for: roomID)
@@ -797,6 +892,24 @@ public actor AccountSessionActor {
                 await diagnostics.record(.error, category: "Timeline", message: "Unable to initialize classic-sync room timeline", metadata: ["roomID": roomID.rawValue, "error": error.localizedDescription])
             }
         }
+    }
+
+    /// Classic `/sync` does not provide the Sliding Sync room-list adapters.
+    /// Ask the SDK's space graph for each known room so the same room summary
+    /// model can place child rooms beneath their direct parent spaces.
+    private func discoverClassicSpaceMemberships(for rooms: [Room]) async {
+        let spaceService = await client.spaceService()
+        var assignments: [RoomIdentifier: Set<SpaceIdentifier>] = [:]
+
+        for room in rooms where !room.isSpace() {
+            let parents = (try? await spaceService.joinedParentsOfChild(childId: room.id())) ?? []
+            let spaceIDs = Set(parents.map { SpaceIdentifier(rawValue: $0.roomId) })
+            if !spaceIDs.isEmpty {
+                assignments[RoomIdentifier(rawValue: room.id())] = spaceIDs
+            }
+        }
+
+        discoveredSpaceIDsByRoom = assignments
     }
 
     private func setupVerification() async {
@@ -1048,7 +1161,6 @@ public actor AccountSessionActor {
             let resolvedRoom = try client.getRoom(roomId: roomID.rawValue)
             guard let room = classicRooms[roomID] ?? resolvedRoom else { throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue) }
             classicRooms[roomID] = room
-            room.enableSendQueue(enable: true)
             let timeline = try await room.timeline()
             let listener = TimelineListenerProxy { [weak self] diff in Task { await self?.handleTimelineDiff(diff, roomID: roomID, room: room, timeline: timeline) } }
             let handle = await timeline.addListener(listener: listener)
@@ -1067,7 +1179,6 @@ public actor AccountSessionActor {
         backgroundSubscribedRoomIDs.insert(roomID)
 
         let room = roomItem
-        room.enableSendQueue(enable: true)
         let timeline = try await room.timeline()
         let listener = TimelineListenerProxy { [weak self] diff in
             Task {
@@ -1623,13 +1734,64 @@ public actor AccountSessionActor {
     private func refreshSpaceHierarchy(for spaceID: SpaceIdentifier) async {
         do {
             let rooms = try await fetchSpaceHierarchyRooms(for: spaceID)
-            await applySpaceHierarchy(spaceID: spaceID, rooms: rooms)
+            let childRooms = rooms.filter { $0.roomID != spaceID.rawValue }
+            if childRooms.isEmpty {
+                // Older homeservers can expose a space room but return no
+                // hierarchy page. Its `m.space.child` state is the canonical
+                // source for direct children and is available with classic
+                // `/sync`-compatible servers such as Conduit.
+                let childRoomIDs = try await fetchSpaceChildRoomIDs(for: spaceID)
+                await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: childRoomIDs)
+                await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from room state", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRoomIDs.count)"])
+            } else {
+                await applySpaceHierarchy(spaceID: spaceID, rooms: childRooms)
+                await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from hierarchy", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRooms.count)"])
+            }
         } catch {
             await diagnostics.record(.debug, category: "Spaces", message: "Failed to refresh space hierarchy", metadata: [
                 "spaceID": spaceID.rawValue,
                 "error": error.localizedDescription
             ])
         }
+    }
+
+    private func fetchSpaceChildRoomIDs(for spaceID: SpaceIdentifier) async throws -> Set<String> {
+        let session = try client.session()
+        guard let encodedRoomID = encodedPathComponent(spaceID.rawValue) else { return [] }
+        var components = URLComponents(url: summary.homeserver, resolvingAgainstBaseURL: false)
+        components?.path = "/_matrix/client/v3/rooms/\(encodedRoomID)/state"
+        guard let url = components?.url else { return [] }
+
+        var request = URLRequest(url: url)
+        request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        request.timeoutInterval = 30
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200 ... 299).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw NSError(domain: "MatrixClient.SpaceState", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Space state request failed with status \(statusCode)."])
+        }
+
+        return Set(
+            try JSONDecoder().decode([MatrixStateEvent].self, from: data)
+                .filter { $0.type == "m.space.child" }
+                .compactMap(\.stateKey)
+        )
+    }
+
+    private func applySpaceChildRoomIDs(spaceID: SpaceIdentifier, childRoomIDs: Set<String>) async {
+        let hierarchyRooms = childRoomIDs.map {
+            SpaceHierarchyRoom(
+                roomID: $0,
+                name: nil,
+                topic: nil,
+                canonicalAlias: nil,
+                roomType: nil,
+                worldReadable: nil,
+                joinRule: nil
+            )
+        }
+        await applySpaceHierarchy(spaceID: spaceID, rooms: hierarchyRooms)
     }
 
     private func fetchSpaceHierarchyRooms(for spaceID: SpaceIdentifier) async throws -> [SpaceHierarchyRoom] {
