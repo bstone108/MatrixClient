@@ -3,6 +3,37 @@ import Foundation
 import Testing
 
 @Test
+func paginatedOlderEventStaysBeforeLatestAfterHistoryMerge() {
+    let roomID = RoomIdentifier(rawValue: "!room:test")
+    let latest = TimelineItem(
+        id: "$latest:test",
+        roomID: roomID,
+        senderID: "@alice:test",
+        senderDisplayName: "Alice",
+        body: "latest",
+        timestamp: Date(timeIntervalSince1970: 200),
+        isOwnMessage: false,
+        isEncrypted: true
+    )
+    let paginatedOlder = TimelineItem(
+        id: "$older:test",
+        roomID: roomID,
+        senderID: "@alice:test",
+        senderDisplayName: "Alice",
+        body: "older",
+        timestamp: Date(timeIntervalSince1970: 100),
+        isOwnMessage: false,
+        isEncrypted: true
+    )
+
+    let merged = TimelineItemReconciler.chronologicallyOrdered(
+        TimelineItemReconciler.deduplicated([latest, paginatedOlder, latest])
+    )
+
+    #expect(merged.map(\.id) == ["$older:test", "$latest:test"])
+}
+
+@Test
 func remoteEchoReplacesQueuedLocalEchoUsingTransactionID() {
     let transactionID = EventTransactionIdentifier(rawValue: "txn-123")
     let queued = TimelineItem(

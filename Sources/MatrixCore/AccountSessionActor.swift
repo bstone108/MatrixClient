@@ -145,6 +145,12 @@ private final class TimelineSubscription: @unchecked Sendable {
     }
 }
 
+private struct PendingTimelineDiffBatch {
+    let diffs: [MatrixRustSDK.TimelineDiff]
+    let room: Room
+    let timeline: Timeline
+}
+
 private final class RoomInfoSubscription: @unchecked Sendable {
     let room: Room
     let listener: RoomInfoListenerProxy
@@ -280,6 +286,12 @@ public actor AccountSessionActor {
     private var roomItems: [Room] = []
     private var roomItemsByID: [RoomIdentifier: Room] = [:]
     private var timelineSubscriptions: [RoomIdentifier: TimelineSubscription] = [:]
+    private var pendingTimelineDiffBatches: [RoomIdentifier: [PendingTimelineDiffBatch]] = [:]
+    private var roomsProcessingTimelineDiffs: Set<RoomIdentifier> = []
+    /// Mirrors the SDK's complete timeline vector, including virtual items
+    /// that do not become app `TimelineItem`s. SDK diff indices are only valid
+    /// against this unfiltered representation.
+    private var sdkRawTimelineItemsByRoom: [RoomIdentifier: [MatrixRustSDK.TimelineItem]] = [:]
     private var roomInfoSubscriptions: [RoomIdentifier: RoomInfoSubscription] = [:]
     private var sdkTimelineItemsByRoom: [RoomIdentifier: [TimelineItem]] = [:]
     private var displayTimelineItemsByRoom: [RoomIdentifier: [TimelineItem]] = [:]
@@ -779,6 +791,9 @@ public actor AccountSessionActor {
             subscription.handle.cancel()
         }
         timelineSubscriptions.removeAll()
+        pendingTimelineDiffBatches.removeAll()
+        roomsProcessingTimelineDiffs.removeAll()
+        sdkRawTimelineItemsByRoom.removeAll()
 
         for subscription in roomInfoSubscriptions.values {
             subscription.handle.cancel()
@@ -916,6 +931,23 @@ public actor AccountSessionActor {
             await slidingSync.apply(roomSummaries: [], removing: orphanedPreviewRoomIDs)
         }
         await slidingSync.replace(spaces: [], rooms: summaries.sorted { $0.timestamp > $1.timestamp })
+        // Subscribe joined rooms before optional space discovery performs any
+        // network requests. Otherwise a classic-sync message batch can arrive
+        // while no timeline listener exists for the room.
+        let joinedRoomIDs = updatedRooms.compactMap { roomID, room in
+            mapRoomMembership(room.membership()) == .joined ? roomID : nil
+        }
+        for roomID in joinedRoomIDs where timelineSubscriptions[roomID] == nil {
+            do {
+                try await ensureTimelineSubscription(for: roomID)
+            } catch {
+                await diagnostics.record(.error, category: "Timeline", message: "Unable to initialize classic-sync room timeline", metadata: [
+                    "roomID": roomID.rawValue,
+                    "phase": "pre-space-refresh",
+                    "error": error.localizedDescription
+                ])
+            }
+        }
         // Conduit can return the joined rooms through classic `/sync` before
         // its local SDK space graph has been populated. Refresh the server's
         // hierarchy for the known space rooms so children are placed under
@@ -946,13 +978,6 @@ public actor AccountSessionActor {
             "knocked": "\(response.rooms.knocked.count)",
             "resolved": "\(updatedRooms.count)"
         ])
-        for roomID in updatedRooms.keys {
-            do {
-                try await ensureTimelineSubscription(for: roomID)
-            } catch {
-                await diagnostics.record(.error, category: "Timeline", message: "Unable to initialize classic-sync room timeline", metadata: ["roomID": roomID.rawValue, "error": error.localizedDescription])
-            }
-        }
     }
 
     /// Classic `/sync` does not provide the Sliding Sync room-list adapters.
@@ -1245,9 +1270,16 @@ public actor AccountSessionActor {
             guard let room = classicRooms[roomID] ?? resolvedRoom else { throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue) }
             classicRooms[roomID] = room
             let timeline = try await room.timeline()
-            let listener = TimelineListenerProxy { [weak self] diff in Task { await self?.handleTimelineDiff(diff, roomID: roomID, room: room, timeline: timeline) } }
+            let listener = TimelineListenerProxy { [weak self] diff in
+                Task { await self?.enqueueTimelineDiff(diff, roomID: roomID, room: room, timeline: timeline) }
+            }
             let handle = await timeline.addListener(listener: listener)
             timelineSubscriptions[roomID] = TimelineSubscription(room: room, timeline: timeline, listener: listener, handle: handle)
+            await diagnostics.record(.info, category: "Timeline", message: "Installed room timeline listener", metadata: [
+                "roomID": roomID.rawValue,
+                "transport": "classicV2",
+                "cachedDisplayCount": "\(displayTimelineItemsByRoom[roomID, default: []].count)"
+            ])
             return
         }
         guard let roomListService else { throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue) }
@@ -1265,63 +1297,108 @@ public actor AccountSessionActor {
         let timeline = try await room.timeline()
         let listener = TimelineListenerProxy { [weak self] diff in
             Task {
-                await self?.handleTimelineDiff(diff, roomID: roomID, room: room, timeline: timeline)
+                await self?.enqueueTimelineDiff(diff, roomID: roomID, room: room, timeline: timeline)
             }
         }
         let handle = await timeline.addListener(listener: listener)
         timelineSubscriptions[roomID] = TimelineSubscription(room: room, timeline: timeline, listener: listener, handle: handle)
+        await diagnostics.record(.info, category: "Timeline", message: "Installed room timeline listener", metadata: [
+            "roomID": roomID.rawValue,
+            "transport": "sliding",
+            "cachedDisplayCount": "\(displayTimelineItemsByRoom[roomID, default: []].count)"
+        ])
     }
 
-    private func handleTimelineDiff(
+    private func enqueueTimelineDiff(
         _ diffs: [MatrixRustSDK.TimelineDiff],
         roomID: RoomIdentifier,
         room: Room,
         timeline: Timeline
     ) async {
-        var sdkItems = sdkTimelineItemsByRoom[roomID, default: []]
+        pendingTimelineDiffBatches[roomID, default: []].append(
+            PendingTimelineDiffBatch(diffs: diffs, room: room, timeline: timeline)
+        )
+        let queueDepth = pendingTimelineDiffBatches[roomID]?.count ?? 0
+        if queueDepth > 1 {
+            await diagnostics.record(.notice, category: "Timeline", message: "Queued overlapping timeline diff batch", metadata: [
+                "roomID": roomID.rawValue,
+                "queueDepth": "\(queueDepth)",
+                "diffs": timelineDiffSummary(diffs)
+            ])
+        }
+
+        guard roomsProcessingTimelineDiffs.insert(roomID).inserted else { return }
+        defer { roomsProcessingTimelineDiffs.remove(roomID) }
+
+        while var batches = pendingTimelineDiffBatches[roomID], !batches.isEmpty {
+            let batch = batches.removeFirst()
+            pendingTimelineDiffBatches[roomID] = batches
+            await processTimelineDiff(
+                batch.diffs,
+                roomID: roomID,
+                room: batch.room,
+                timeline: batch.timeline
+            )
+        }
+        pendingTimelineDiffBatches.removeValue(forKey: roomID)
+    }
+
+    private func processTimelineDiff(
+        _ diffs: [MatrixRustSDK.TimelineDiff],
+        roomID: RoomIdentifier,
+        room: Room,
+        timeline: Timeline
+    ) async {
+        var rawItems = sdkRawTimelineItemsByRoom[roomID, default: []]
+        let previousSDKItems = sdkTimelineItemsByRoom[roomID, default: []]
         let previousItems = displayTimelineItemsByRoom[roomID, default: []]
+        let previousLatest = latestRemoteMessage(in: previousItems)
 
         for diff in diffs {
             switch diff {
             case let .append(values):
-                let incoming = await convert(items: values, roomID: roomID, room: room)
-                sdkItems.append(contentsOf: mergeIncomingTimelineItems(incoming, existingItems: sdkItems))
+                rawItems.append(contentsOf: values)
             case .clear:
-                sdkItems.removeAll()
+                rawItems.removeAll()
             case let .insert(index, value):
-                if let item = await convert(item: value, roomID: roomID, room: room) {
-                    let merged = mergeIncomingTimelineItem(item, existingItems: sdkItems)
-                    sdkItems.insert(merged, at: min(Int(index), sdkItems.count))
-                }
+                rawItems.insert(value, at: min(Int(index), rawItems.count))
             case let .set(index, value):
-                if sdkItems.indices.contains(Int(index)), let item = await convert(item: value, roomID: roomID, room: room) {
-                    sdkItems[Int(index)] = mergeIncomingTimelineItem(item, existingItems: sdkItems)
+                if rawItems.indices.contains(Int(index)) {
+                    rawItems[Int(index)] = value
                 }
             case let .remove(index):
-                if sdkItems.indices.contains(Int(index)) {
-                    sdkItems.remove(at: Int(index))
+                if rawItems.indices.contains(Int(index)) {
+                    rawItems.remove(at: Int(index))
                 }
             case let .pushBack(value):
-                if let converted = await convert(item: value, roomID: roomID, room: room) {
-                    sdkItems.append(mergeIncomingTimelineItem(converted, existingItems: sdkItems))
-                }
+                rawItems.append(value)
             case let .pushFront(value):
-                if let converted = await convert(item: value, roomID: roomID, room: room) {
-                    sdkItems.insert(mergeIncomingTimelineItem(converted, existingItems: sdkItems), at: 0)
-                }
+                rawItems.insert(value, at: 0)
             case .popBack:
-                _ = sdkItems.popLast()
+                _ = rawItems.popLast()
             case .popFront:
-                if !sdkItems.isEmpty {
-                    sdkItems.removeFirst()
+                if !rawItems.isEmpty {
+                    rawItems.removeFirst()
                 }
             case let .truncate(length):
-                sdkItems = Array(sdkItems.prefix(Int(length)))
+                rawItems = Array(rawItems.prefix(Int(length)))
             case let .reset(values):
-                let incoming = await convert(items: values, roomID: roomID, room: room)
-                sdkItems = mergeResetTimelineItems(incoming, existingItems: sdkItems)
+                rawItems = values
             }
         }
+        sdkRawTimelineItemsByRoom[roomID] = rawItems
+
+        // Convert only after applying the entire diff batch to the SDK's full
+        // vector. Merge with retained app history so a 20-item SDK window does
+        // not discard older messages that were already persisted.
+        let convertedRawItems = await convert(items: rawItems, roomID: roomID, room: room)
+        let sdkItems = retainedTimelineItems(
+            from: TimelineItemReconciler.chronologicallyOrdered(
+                TimelineItemReconciler.deduplicated(
+                    mergeResetTimelineItems(convertedRawItems, existingItems: previousSDKItems)
+                )
+            )
+        )
 
         let resolvedSDKItems = await refreshPendingDeliveryStates(
             in: sdkItems,
@@ -1332,6 +1409,29 @@ public actor AccountSessionActor {
         sdkTimelineItemsByRoom[roomID] = resolvedSDKItems
         let current = derivedDisplayTimeline(from: resolvedSDKItems)
         displayTimelineItemsByRoom[roomID] = current
+        let currentLatest = latestRemoteMessage(in: current)
+        let diagnosticMetadata = [
+            "roomID": roomID.rawValue,
+            "diffs": timelineDiffSummary(diffs),
+            "rawSDKCount": "\(rawItems.count)",
+            "sdkCount": "\(resolvedSDKItems.count)",
+            "displayCount": "\(current.count)",
+            "previousLatestEventID": previousLatest?.id ?? "none",
+            "previousLatestTimestampMs": timestampMilliseconds(previousLatest?.timestamp),
+            "currentLatestEventID": currentLatest?.id ?? "none",
+            "currentLatestTimestampMs": timestampMilliseconds(currentLatest?.timestamp)
+        ]
+        if previousLatest?.id != currentLatest?.id {
+            await diagnostics.record(.info, category: "Timeline", message: "Advanced room timeline", metadata: diagnosticMetadata)
+        } else if timelineDiffMayContainNewItems(diffs) {
+            await diagnostics.record(.notice, category: "Timeline", message: "Timeline update did not advance latest message", metadata: diagnosticMetadata)
+        }
+        if previousLatest?.id != currentLatest?.id,
+           let previousTimestamp = previousLatest?.timestamp,
+           let currentTimestamp = currentLatest?.timestamp,
+           currentTimestamp < previousTimestamp {
+            await diagnostics.record(.error, category: "Timeline", message: "Room timeline regressed", metadata: diagnosticMetadata)
+        }
         await prefetchMediaIfNeeded(from: current)
         let retainedMediaItems = current.filter { $0.media != nil }
         await mediaCache.prune(
@@ -1355,6 +1455,44 @@ public actor AccountSessionActor {
         if current.contains(where: requiresPendingDeliveryMonitoring(_:)) {
             schedulePendingSendMonitor(for: roomID)
         }
+    }
+
+    private func latestRemoteMessage(in items: [TimelineItem]) -> TimelineItem? {
+        items.last { $0.kind == .message && $0.id.hasPrefix("$") }
+    }
+
+    private func timestampMilliseconds(_ date: Date?) -> String {
+        guard let date else { return "none" }
+        return String(Int64(date.timeIntervalSince1970 * 1_000))
+    }
+
+    private func timelineDiffMayContainNewItems(_ diffs: [MatrixRustSDK.TimelineDiff]) -> Bool {
+        diffs.contains { diff in
+            switch diff {
+            case .append, .insert, .pushBack, .pushFront, .set:
+                return true
+            case .clear, .remove, .popBack, .popFront, .reset, .truncate:
+                return false
+            }
+        }
+    }
+
+    private func timelineDiffSummary(_ diffs: [MatrixRustSDK.TimelineDiff]) -> String {
+        diffs.map { diff in
+            switch diff {
+            case let .append(values): "append:\(values.count)"
+            case .clear: "clear"
+            case let .insert(index, _): "insert:\(index)"
+            case let .set(index, _): "set:\(index)"
+            case let .remove(index): "remove:\(index)"
+            case .pushBack: "pushBack"
+            case .pushFront: "pushFront"
+            case .popBack: "popBack"
+            case .popFront: "popFront"
+            case let .truncate(length): "truncate:\(length)"
+            case let .reset(values): "reset:\(values.count)"
+            }
+        }.joined(separator: ",")
     }
 
     private func mergeIncomingTimelineItems(_ incomingItems: [TimelineItem], existingItems: [TimelineItem]) -> [TimelineItem] {

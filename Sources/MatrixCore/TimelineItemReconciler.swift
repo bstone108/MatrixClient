@@ -41,6 +41,19 @@ enum TimelineItemReconciler {
         return result
     }
 
+    /// The SDK window and retained app history can overlap. Newly paginated
+    /// older events must remain before the latest event after that overlap is
+    /// deduplicated, regardless of whether the SDK delivered them via
+    /// `pushFront` or `insert`.
+    static func chronologicallyOrdered(_ items: [TimelineItem]) -> [TimelineItem] {
+        items.enumerated().sorted { lhs, rhs in
+            if lhs.element.timestamp != rhs.element.timestamp {
+                return lhs.element.timestamp < rhs.element.timestamp
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
+    }
+
     static func normalizedReadReceipts(in items: [TimelineItem]) -> [TimelineItem] {
         guard !items.isEmpty else { return [] }
 
