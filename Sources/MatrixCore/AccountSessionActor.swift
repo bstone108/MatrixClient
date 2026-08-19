@@ -228,9 +228,11 @@ private struct MatrixStateEvent: Decodable, Sendable {
 
 private struct MatrixStateContent: Decodable, Sendable {
     let roomType: String?
+    let via: [String]?
 
     private enum CodingKeys: String, CodingKey {
         case roomType = "type"
+        case via
     }
 }
 
@@ -871,6 +873,17 @@ public actor AccountSessionActor {
             let roomID = RoomIdentifier(rawValue: room.id())
             updatedRooms[roomID] = room
             let isSpace = room.isSpace() || serverSpaceIDs.contains(SpaceIdentifier(rawValue: roomID.rawValue))
+            let spaceIDs = currentSpaceIDs(for: roomID)
+            let actualMembership = mapRoomMembership(room.membership())
+            let listMembership: RoomMembership
+            if actualMembership == .left, isSpace || !spaceIDs.isEmpty {
+                // A left room remains useful as a known, current child of a
+                // visible space, but must never look joined or appear at the
+                // top level. Removed/non-child left rooms stay `.left`.
+                listMembership = .notJoined
+            } else {
+                listMembership = actualMembership
+            }
             let timelineItems = displayTimelineItemsByRoom[roomID] ?? []
             let latest = timelineItems.last
             summaries.append(RoomSummary(
@@ -885,10 +898,23 @@ public actor AccountSessionActor {
                 isEncrypted: await room.isEncrypted(),
                 lastSenderDisplayName: latest?.senderDisplayName ?? "",
                 canonicalAlias: room.canonicalAlias(),
-                roomKind: isSpace ? .space : .room
+                roomKind: isSpace ? .space : .room,
+                membership: listMembership,
+                spaceIDs: spaceIDs
             ))
         }
         classicRooms = updatedRooms
+        let orphanedPreviewRoomIDs: Set<RoomIdentifier> = Set(
+            (await slidingSync.allKnownRoomSummaries()).compactMap { roomSummary in
+                guard roomSummary.membership == .notJoined,
+                      roomSummary.spaceIDs.isEmpty,
+                      updatedRooms[roomSummary.roomID] == nil else { return nil }
+                return roomSummary.roomID
+            }
+        )
+        if !orphanedPreviewRoomIDs.isEmpty {
+            await slidingSync.apply(roomSummaries: [], removing: orphanedPreviewRoomIDs)
+        }
         await slidingSync.replace(spaces: [], rooms: summaries.sorted { $0.timestamp > $1.timestamp })
         // Conduit can return the joined rooms through classic `/sync` before
         // its local SDK space graph has been populated. Refresh the server's
@@ -1845,7 +1871,7 @@ public actor AccountSessionActor {
             return try databaseQueue.read { database in
                 let rows = try Row.fetchAll(
                     database,
-                    sql: "SELECT CAST(state_key AS TEXT) AS roomID FROM state_event WHERE CAST(room_id AS TEXT) = ? AND CAST(event_type AS TEXT) = 'm.space.child'",
+                    sql: "SELECT CAST(state_key AS TEXT) AS roomID FROM state_event WHERE CAST(room_id AS TEXT) = ? AND CAST(event_type AS TEXT) = 'm.space.child' AND json_type(CAST(data AS TEXT), '$.content.via') = 'array' AND json_array_length(CAST(data AS TEXT), '$.content.via') > 0",
                     arguments: [spaceID.rawValue]
                 )
                 return Set(rows.compactMap { row in row["roomID"] as String? })
@@ -1858,7 +1884,7 @@ public actor AccountSessionActor {
     private func fetchSpaceChildRoomIDs(for spaceID: SpaceIdentifier) async throws -> Set<String> {
         return Set(
             try await fetchRoomStateEvents(for: RoomIdentifier(rawValue: spaceID.rawValue))
-                .filter { $0.type == "m.space.child" }
+                .filter { $0.type == "m.space.child" && !($0.content.via ?? []).isEmpty }
                 .compactMap(\.stateKey)
         )
     }
@@ -1959,18 +1985,18 @@ public actor AccountSessionActor {
         // `/sync` is still establishing its initial room set.
         guard syncTransport != .classicV2 || !classicRooms.isEmpty else { return }
         let hierarchyRoomIDs = Set(rooms.map(\.roomID))
-        // In classic-sync mode, the cached SDK state can contain old or
-        // redacted `m.space.child` events for rooms we no longer know. The
-        // UI requirement is to group *known* rooms only; do not surface stale
-        // children as red, unjoinable preview rows.
+        // The classic SDK retains known left rooms, which lets us show a
+        // named space child such as BDSM below the joined divider. Unknown
+        // child IDs are redacted/inaccessible previews and are not list rows.
         let validRoomIDs: Set<String>
         if syncTransport == .classicV2 {
-            let knownRoomIDs = Set(classicRooms.keys.map(\.rawValue))
-            validRoomIDs = hierarchyRoomIDs.intersection(knownRoomIDs)
+            validRoomIDs = hierarchyRoomIDs.intersection(Set(classicRooms.keys.map(\.rawValue)))
         } else {
             validRoomIDs = hierarchyRoomIDs
         }
         var changed = false
+        var updatedSummaries: [RoomSummary] = []
+        var removedRoomIDs: Set<RoomIdentifier> = []
 
         let previouslyAssignedRoomIDs = discoveredSpaceIDsByRoom.compactMap { roomID, spaceIDs in
             spaceIDs.contains(spaceID) ? roomID : nil
@@ -1979,49 +2005,53 @@ public actor AccountSessionActor {
             var memberships = discoveredSpaceIDsByRoom[roomID, default: []]
             if memberships.remove(spaceID) != nil {
                 discoveredSpaceIDsByRoom[roomID] = memberships
-                await updateSpaceAssignments(for: roomID)
+                if let existingSummary = await slidingSync.roomSummary(for: roomID) {
+                    if memberships.isEmpty,
+                       existingSummary.membership == .notJoined,
+                       classicRooms[roomID] == nil {
+                        removedRoomIDs.insert(roomID)
+                    } else {
+                        let membership = classicRooms[roomID].map { mapRoomMembership($0.membership()) }
+                            ?? existingSummary.membership
+                        updatedSummaries.append(summary(
+                            existingSummary,
+                            replacingSpaceIDs: currentSpaceIDs(for: roomID),
+                            membership: membership
+                        ))
+                    }
+                }
                 changed = true
             }
         }
 
         for hierarchyRoom in rooms {
             let roomID = RoomIdentifier(rawValue: hierarchyRoom.roomID)
-            if syncTransport == .classicV2, !validRoomIDs.contains(roomID.rawValue) {
-                continue
-            }
+            guard validRoomIDs.contains(roomID.rawValue) else { continue }
             var memberships = discoveredSpaceIDsByRoom[roomID, default: []]
             let inserted = memberships.insert(spaceID).inserted
             discoveredSpaceIDsByRoom[roomID] = memberships
 
             if let existingSummary = await slidingSync.roomSummary(for: roomID) {
-                let updatedSummary = RoomSummary(
-                    roomID: existingSummary.roomID,
-                    displayName: existingSummary.displayName,
-                    topic: existingSummary.topic,
-                    lastMessagePreview: existingSummary.lastMessagePreview,
-                    timestamp: existingSummary.timestamp,
-                    unreadCount: existingSummary.unreadCount,
-                    highlightCount: existingSummary.highlightCount,
-                    isDirect: existingSummary.isDirect,
-                    isEncrypted: existingSummary.isEncrypted,
-                    lastSenderDisplayName: existingSummary.lastSenderDisplayName,
-                    canonicalAlias: existingSummary.canonicalAlias,
-                    roomKind: existingSummary.roomKind,
-                    membership: existingSummary.membership,
-                    spaceIDs: currentSpaceIDs(for: roomID),
-                    isPublic: existingSummary.isPublic,
-                    canJoin: existingSummary.canJoin
+                let membership: RoomMembership = existingSummary.membership == .left ? .notJoined : existingSummary.membership
+                let updatedSummary = summary(
+                    existingSummary,
+                    replacingSpaceIDs: currentSpaceIDs(for: roomID),
+                    membership: membership
                 )
                 if updatedSummary != existingSummary {
-                    await slidingSync.updateRoomSummary(updatedSummary)
+                    updatedSummaries.append(updatedSummary)
                     changed = true
                 } else if inserted {
                     changed = true
                 }
             } else {
-                await slidingSync.updateRoomSummary(roomSummary(from: hierarchyRoom, spaceID: spaceID))
+                updatedSummaries.append(roomSummary(from: hierarchyRoom, spaceID: spaceID))
                 changed = true
             }
+        }
+
+        if !updatedSummaries.isEmpty || !removedRoomIDs.isEmpty {
+            await slidingSync.apply(roomSummaries: updatedSummaries, removing: removedRoomIDs)
         }
 
         if let spaceSummary = await buildSpaceSummary(spaceID: spaceID) {
@@ -2032,6 +2062,31 @@ public actor AccountSessionActor {
         if changed {
             await persistCurrentRoomSummarySnapshot()
         }
+    }
+
+    private func summary(
+        _ existingSummary: RoomSummary,
+        replacingSpaceIDs spaceIDs: [SpaceIdentifier],
+        membership: RoomMembership? = nil
+    ) -> RoomSummary {
+        RoomSummary(
+            roomID: existingSummary.roomID,
+            displayName: existingSummary.displayName,
+            topic: existingSummary.topic,
+            lastMessagePreview: existingSummary.lastMessagePreview,
+            timestamp: existingSummary.timestamp,
+            unreadCount: existingSummary.unreadCount,
+            highlightCount: existingSummary.highlightCount,
+            isDirect: existingSummary.isDirect,
+            isEncrypted: existingSummary.isEncrypted,
+            lastSenderDisplayName: existingSummary.lastSenderDisplayName,
+            canonicalAlias: existingSummary.canonicalAlias,
+            roomKind: existingSummary.roomKind,
+            membership: membership ?? existingSummary.membership,
+            spaceIDs: spaceIDs,
+            isPublic: existingSummary.isPublic,
+            canJoin: existingSummary.canJoin
+        )
     }
 
     private func updateSpaceAssignments(for roomID: RoomIdentifier) async {

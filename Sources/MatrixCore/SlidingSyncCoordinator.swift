@@ -36,6 +36,23 @@ public actor SlidingSyncCoordinator {
         for room in rooms {
             self.rooms[room.roomID] = room
         }
+        yieldRoomLists()
+    }
+
+    /// Applies a reconciliation as one observable room-list change. Space
+    /// membership updates otherwise arrive one room at a time and make rooms
+    /// visibly jump between the top-level and space-filtered lists.
+    public func apply(roomSummaries: [RoomSummary], removing roomIDs: Set<RoomIdentifier> = []) {
+        for roomID in roomIDs {
+            rooms.removeValue(forKey: roomID)
+        }
+        for roomSummary in roomSummaries {
+            rooms[roomSummary.roomID] = roomSummary
+        }
+        yieldRoomLists()
+    }
+
+    private func yieldRoomLists() {
         let keys = broadcasters.keys.isEmpty ? ["__all__"] : Array(broadcasters.keys)
         for key in keys {
             let spaceID = key == "__all__" ? nil : SpaceIdentifier(rawValue: key)

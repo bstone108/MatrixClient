@@ -249,7 +249,7 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
             grouped.append(contentsOf: joined.map(ListRow.room))
         }
         if !unjoined.isEmpty {
-            grouped.append(.section("Other rooms"))
+            grouped.append(.section("Not joined rooms"))
             grouped.append(contentsOf: unjoined.map(ListRow.room))
         }
         rows = grouped

@@ -436,8 +436,10 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
 
         spaces = await matrixClient.spaceSummaries(for: accountID)
         if restorePersistedSelection,
-           let persistedSpaceID = persistedSelectedSpaceID(for: accountID),
-           spaces.contains(where: { $0.spaceID == persistedSpaceID }) {
+           let persistedSpaceID = persistedSelectedSpaceID(for: accountID) {
+            // The first room snapshot can precede restored or server-backed
+            // space summaries. Preserve the requested filter while those
+            // summaries catch up instead of erasing it during startup.
             selectedSpaceID = persistedSpaceID
         } else {
             selectedSpaceID = nil

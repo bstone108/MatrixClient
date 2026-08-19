@@ -45,6 +45,7 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
         .securityVerification
     ]
     private var isApplyingSelection = false
+    private var selectionApplicationGeneration = 0
 
     init(state: WorkspaceStateController) {
         self.state = state
@@ -207,6 +208,18 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
     }
 
     private func reloadData() {
+        selectionApplicationGeneration += 1
+        let generation = selectionApplicationGeneration
+        isApplyingSelection = true
+        defer {
+            // AppKit can deliver the selection notification on the next main
+            // run-loop turn after reloadData returns. Keep programmatic
+            // selection suppressed until that notification has drained.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.selectionApplicationGeneration == generation else { return }
+                self.isApplyingSelection = false
+            }
+        }
         outlineView.reloadData()
         sections.forEach { outlineView.expandItem($0) }
 
@@ -221,9 +234,7 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
 
         guard let targetRow else { return }
         if outlineView.selectedRow != targetRow {
-            isApplyingSelection = true
             outlineView.selectRowIndexes(IndexSet(integer: targetRow), byExtendingSelection: false)
-            isApplyingSelection = false
         }
     }
 
