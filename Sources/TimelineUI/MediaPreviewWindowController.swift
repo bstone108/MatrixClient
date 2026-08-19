@@ -2,6 +2,14 @@ import AppKit
 import MatrixCore
 import MediaKit
 
+/// `NSImageView` normally reports the source image's dimensions as its
+/// intrinsic content size. In a fixed media-preview window that can make a
+/// large image draw at its native size instead of accepting the viewport's
+/// dimensions. The viewport owns the size; the image only aspect-fits it.
+private final class AspectFitImageView: NSImageView {
+    override var intrinsicContentSize: NSSize { .zero }
+}
+
 final class MediaPreviewWindowController: NSWindowController, NSWindowDelegate {
     private enum Layout {
         static let defaultContentSize = NSSize(width: 1_080, height: 760)
@@ -37,14 +45,18 @@ final class MediaPreviewWindowController: NSWindowController, NSWindowDelegate {
         case .video:
             contentView = videoPlaybackEngine.makePlayerView(for: url)
         case .image:
-            let imageView = NSImageView(frame: .zero)
+            let imageView = AspectFitImageView(frame: .zero)
             imageView.image = NSImage(contentsOf: url)
             imageView.imageScaling = .scaleProportionallyUpOrDown
+            imageView.imageAlignment = .alignCenter
+            imageView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            imageView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
             imageView.translatesAutoresizingMaskIntoConstraints = false
 
             let container = NSView()
             container.wantsLayer = true
             container.layer?.backgroundColor = NSColor.black.cgColor
+            container.layer?.masksToBounds = true
             container.addSubview(imageView)
 
             NSLayoutConstraint.activate([
