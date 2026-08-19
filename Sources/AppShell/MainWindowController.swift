@@ -24,7 +24,6 @@ final class MainWindowController: NSWindowController {
     private var isApplyingManagedFrame = false
     private var isRestoringInitialFrame = true
     private var userAdjustedWindowFrame = false
-    private var hasScheduledVisibleFrameSanitization = false
 
     init(state: WorkspaceStateController, videoPlaybackEngine: any VideoPlaybackEngine) {
         self.state = state
@@ -222,23 +221,6 @@ final class MainWindowController: NSWindowController {
         }
     }
 
-    private func sanitizeVisibleWindowFrameIfNeeded() {
-        guard let window else { return }
-        let sanitized = sanitizedFrame(for: window.frame, centerIfNeeded: false)
-        guard !window.frame.equalTo(sanitized) else { return }
-        applyManagedFrame(sanitized, display: window.isVisible)
-    }
-
-    private func requestVisibleWindowFrameSanitization() {
-        guard !hasScheduledVisibleFrameSanitization else { return }
-        hasScheduledVisibleFrameSanitization = true
-        DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.hasScheduledVisibleFrameSanitization = false
-            self.sanitizeVisibleWindowFrameIfNeeded()
-        }
-    }
-
     private func defaultWindowFrame(centered: Bool) -> NSRect {
         let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(origin: .zero, size: WindowMetrics.defaultSize)
         let width = min(WindowMetrics.defaultSize.width, visibleFrame.width)
@@ -347,7 +329,6 @@ extension MainWindowController: NSToolbarDelegate {
 
 extension MainWindowController: NSWindowDelegate {
     func windowDidMove(_ notification: Notification) {
-        requestVisibleWindowFrameSanitization()
         if !isApplyingManagedFrame, !isRestoringInitialFrame {
             userAdjustedWindowFrame = true
         }
@@ -355,7 +336,6 @@ extension MainWindowController: NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) {
-        requestVisibleWindowFrameSanitization()
         if !isApplyingManagedFrame, !isRestoringInitialFrame {
             userAdjustedWindowFrame = true
         }
