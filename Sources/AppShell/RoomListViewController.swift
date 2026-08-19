@@ -91,10 +91,37 @@ final class RoomListCellView: NSTableCellView {
     }
 }
 
+private final class RoomListSectionView: NSTableCellView {
+    private let label = NSTextField(labelWithString: "")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor)
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func configure(title: String) { label.stringValue = title }
+}
+
 final class RoomListViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
+    private enum ListRow {
+        case room(RoomSummary)
+        case section(String)
+    }
+
     private let state: WorkspaceStateController
     private let tableView = NSTableView(frame: .zero)
     private var isApplyingSelection = false
+    private var rows: [ListRow] = []
 
     init(state: WorkspaceStateController) {
         self.state = state
@@ -142,34 +169,58 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        state.rooms.count
+        rows.count
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let identifier = NSUserInterfaceItemIdentifier("RoomCell")
-        let cell = (tableView.makeView(withIdentifier: identifier, owner: self) as? RoomListCellView) ?? {
-            let newCell = RoomListCellView()
-            newCell.identifier = identifier
-            return newCell
-        }()
-        let room = state.rooms[row]
-        cell.configure(room: room, selected: state.selectedRoomID == room.roomID)
-        return cell
+        switch rows[row] {
+        case let .section(title):
+            let identifier = NSUserInterfaceItemIdentifier("RoomSection")
+            let cell = (tableView.makeView(withIdentifier: identifier, owner: self) as? RoomListSectionView) ?? {
+                let newCell = RoomListSectionView()
+                newCell.identifier = identifier
+                return newCell
+            }()
+            cell.configure(title: title)
+            return cell
+        case let .room(room):
+            let identifier = NSUserInterfaceItemIdentifier("RoomCell")
+            let cell = (tableView.makeView(withIdentifier: identifier, owner: self) as? RoomListCellView) ?? {
+                let newCell = RoomListCellView()
+                newCell.identifier = identifier
+                return newCell
+            }()
+            cell.configure(room: room, selected: state.selectedRoomID == room.roomID)
+            return cell
+        }
+    }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if case .section = rows[row] { return 28 }
+        return 58
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !isApplyingSelection else { return }
-        guard tableView.selectedRow >= 0, tableView.selectedRow < state.rooms.count else { return }
+        guard tableView.selectedRow >= 0, tableView.selectedRow < rows.count else { return }
+        guard case let .room(room) = rows[tableView.selectedRow] else {
+            tableView.deselectAll(nil)
+            return
+        }
 
-        let selectedRoomID = state.rooms[tableView.selectedRow].roomID
+        let selectedRoomID = room.roomID
         guard state.selectedRoomID != selectedRoomID else { return }
         state.selectRoom(selectedRoomID)
     }
 
     private func reloadData() {
+        rebuildRows()
         tableView.reloadData()
         guard let selectedRoomID = state.selectedRoomID,
-              let row = state.rooms.firstIndex(where: { $0.roomID == selectedRoomID }) else {
+              let row = rows.firstIndex(where: {
+                  if case let .room(room) = $0 { return room.roomID == selectedRoomID }
+                  return false
+              }) else {
             guard tableView.selectedRow != -1 else { return }
             isApplyingSelection = true
             tableView.deselectAll(nil)
@@ -182,5 +233,25 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
             tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
             isApplyingSelection = false
         }
+    }
+
+    private func rebuildRows() {
+        guard state.selectedSpaceID != nil else {
+            rows = state.rooms.map(ListRow.room)
+            return
+        }
+
+        let joined = state.rooms.filter(\.isJoined)
+        let unjoined = state.rooms.filter { !$0.isJoined }
+        var grouped: [ListRow] = []
+        if !joined.isEmpty {
+            grouped.append(.section("Joined rooms"))
+            grouped.append(contentsOf: joined.map(ListRow.room))
+        }
+        if !unjoined.isEmpty {
+            grouped.append(.section("Other rooms"))
+            grouped.append(contentsOf: unjoined.map(ListRow.room))
+        }
+        rows = grouped
     }
 }

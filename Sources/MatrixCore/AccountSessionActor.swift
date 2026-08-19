@@ -1,6 +1,7 @@
 import Diagnostics
 import Foundation
 import Persistence
+import GRDB
 
 #if canImport(MatrixRustSDK)
 @preconcurrency import MatrixRustSDK
@@ -216,10 +217,20 @@ private struct SpaceHierarchyRoom: Decodable, Sendable {
 private struct MatrixStateEvent: Decodable, Sendable {
     let type: String
     let stateKey: String?
+    let content: MatrixStateContent
 
     private enum CodingKeys: String, CodingKey {
         case type
         case stateKey = "state_key"
+        case content
+    }
+}
+
+private struct MatrixStateContent: Decodable, Sendable {
+    let roomType: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case roomType = "type"
     }
 }
 
@@ -237,6 +248,7 @@ public actor AccountSessionActor {
 
     private let diagnostics: DiagnosticsService
     private let client: Client
+    private let sdkStateDatabaseURL: URL
     private var syncTransport: SyncTransport
     private let slidingSync = SlidingSyncCoordinator(spaces: [], rooms: [])
     private let timelineStore = TimelineStore()
@@ -284,9 +296,10 @@ public actor AccountSessionActor {
     private var verificationSnapshot: VerificationSnapshot
     private var bootstrapped = false
 
-    private init(summary: AccountSummary, client: Client, syncTransport: SyncTransport, diagnostics: DiagnosticsService, cacheRootURL: URL, database: AppDatabase) {
+    private init(summary: AccountSummary, client: Client, syncTransport: SyncTransport, diagnostics: DiagnosticsService, cacheRootURL: URL, sdkDataURL: URL, database: AppDatabase) {
         self.summary = summary
         self.client = client
+        self.sdkStateDatabaseURL = sdkDataURL.appendingPathComponent("matrix-sdk-state.sqlite3")
         self.syncTransport = syncTransport
         self.diagnostics = diagnostics
         self.mediaCache = MatrixMediaCache(
@@ -366,6 +379,7 @@ public actor AccountSessionActor {
             syncTransport: syncTransport,
             diagnostics: diagnostics,
             cacheRootURL: cacheRootURL(for: summary.accountID, applicationSupportURL: applicationSupportURL),
+            sdkDataURL: URL(fileURLWithPath: paths.dataPath, isDirectory: true),
             database: database
         )
     }
@@ -401,6 +415,7 @@ public actor AccountSessionActor {
             syncTransport: syncTransport,
             diagnostics: diagnostics,
             cacheRootURL: cacheRootURL(for: summary.accountID, applicationSupportURL: applicationSupportURL),
+            sdkDataURL: URL(fileURLWithPath: paths.dataPath, isDirectory: true),
             database: database
         )
     }
@@ -827,6 +842,12 @@ public actor AccountSessionActor {
                 .filter(\.isSpace)
                 .map { SpaceIdentifier(rawValue: $0.roomID.rawValue) }
         )
+        let persistedSpaceIDs = Set(
+            ((try? await roomSummaryRepository.fetchAll()) ?? [])
+                .compactMap { decodeRoomSummary(from: $0.payload) }
+                .filter(\.isSpace)
+                .map { SpaceIdentifier(rawValue: $0.roomID.rawValue) }
+        )
         let syncedRoomIDs = Set(
             response.rooms.joined + response.rooms.invited + response.rooms.knocked
         )
@@ -838,12 +859,13 @@ public actor AccountSessionActor {
         }
         let rooms = Array(roomsByID.values)
         await discoverClassicSpaceMemberships(for: rooms)
+        let serverSpaceIDs = await discoverServerSpaceIDs(for: rooms)
         var summaries: [RoomSummary] = []
         var updatedRooms: [RoomIdentifier: Room] = [:]
         for room in rooms {
             let roomID = RoomIdentifier(rawValue: room.id())
             updatedRooms[roomID] = room
-            let isSpace = room.isSpace()
+            let isSpace = room.isSpace() || serverSpaceIDs.contains(SpaceIdentifier(rawValue: roomID.rawValue))
             let timelineItems = displayTimelineItemsByRoom[roomID] ?? []
             let latest = timelineItems.last
             summaries.append(RoomSummary(
@@ -875,7 +897,15 @@ public actor AccountSessionActor {
             (await spaceService.topLevelJoinedSpaces())
                 .map { SpaceIdentifier(rawValue: $0.roomId) }
         )
-        for spaceID in cachedSpaceIDs.union(discoveredSpaceIDs).union(sdkSpaceIDs) {
+        let allSpaceIDs = cachedSpaceIDs.union(persistedSpaceIDs).union(discoveredSpaceIDs).union(sdkSpaceIDs)
+        await diagnostics.record(.info, category: "Spaces", message: "Discovered candidate spaces for classic sync", metadata: [
+            "cached": "\(cachedSpaceIDs.count)",
+            "persisted": "\(persistedSpaceIDs.count)",
+            "server": "\(serverSpaceIDs.count)",
+            "sdk": "\(sdkSpaceIDs.count)",
+            "total": "\(allSpaceIDs.count)"
+        ])
+        for spaceID in allSpaceIDs {
             await refreshSpaceHierarchy(for: spaceID)
         }
         await persistCurrentRoomSummarySnapshot()
@@ -909,7 +939,29 @@ public actor AccountSessionActor {
             }
         }
 
-        discoveredSpaceIDsByRoom = assignments
+        // The SDK's derived space graph may be empty on a classic-sync
+        // homeserver even though the authoritative state fallback has already
+        // populated memberships. Merge only positive SDK discoveries so a
+        // subsequent incremental sync cannot erase valid assignments.
+        for (roomID, spaceIDs) in assignments where !spaceIDs.isEmpty {
+            discoveredSpaceIDsByRoom[roomID] = spaceIDs
+        }
+    }
+
+    /// Classic sync can omit the SDK's derived `isSpace` flag on older
+    /// homeservers. Read the authoritative `m.room.create` state from the
+    /// server for the known rooms, then use its `type: m.space` marker to
+    /// seed hierarchy queries.
+    private func discoverServerSpaceIDs(for rooms: [Room]) async -> Set<SpaceIdentifier> {
+        var spaceIDs: Set<SpaceIdentifier> = []
+        for room in rooms {
+            guard let events = try? await fetchRoomStateEvents(for: RoomIdentifier(rawValue: room.id())),
+                  events.contains(where: { $0.type == "m.room.create" && $0.content.roomType == "m.space" }) else {
+                continue
+            }
+            spaceIDs.insert(SpaceIdentifier(rawValue: room.id()))
+        }
+        return spaceIDs
     }
 
     private func setupVerification() async {
@@ -1736,32 +1788,77 @@ public actor AccountSessionActor {
             let rooms = try await fetchSpaceHierarchyRooms(for: spaceID)
             let childRooms = rooms.filter { $0.roomID != spaceID.rawValue }
             if childRooms.isEmpty {
-                // Older homeservers can expose a space room but return no
-                // hierarchy page. Its `m.space.child` state is the canonical
-                // source for direct children and is available with classic
-                // `/sync`-compatible servers such as Conduit.
-                let childRoomIDs = try await fetchSpaceChildRoomIDs(for: spaceID)
-                await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: childRoomIDs)
-                await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from room state", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRoomIDs.count)"])
+                try await refreshSpaceChildrenFromState(spaceID: spaceID)
             } else {
                 await applySpaceHierarchy(spaceID: spaceID, rooms: childRooms)
                 await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from hierarchy", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRooms.count)"])
             }
         } catch {
-            await diagnostics.record(.debug, category: "Spaces", message: "Failed to refresh space hierarchy", metadata: [
-                "spaceID": spaceID.rawValue,
-                "error": error.localizedDescription
-            ])
+            // Conduit may advertise the hierarchy route but not complete its
+            // response. The room's `m.space.child` state is sufficient for
+            // direct grouping, so use it even when hierarchy itself fails.
+            do {
+                try await refreshSpaceChildrenFromState(spaceID: spaceID)
+            } catch {
+                let cachedChildRoomIDs = cachedSpaceChildRoomIDs(for: spaceID)
+                if cachedChildRoomIDs.isEmpty {
+                    await diagnostics.record(.error, category: "Spaces", message: "Failed to refresh space membership", metadata: [
+                        "spaceID": spaceID.rawValue,
+                        "error": error.localizedDescription
+                    ])
+                } else {
+                    await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: cachedChildRoomIDs)
+                    await diagnostics.record(.notice, category: "Spaces", message: "Refreshed space children from synced SDK state", metadata: [
+                        "spaceID": spaceID.rawValue,
+                        "childCount": "\(cachedChildRoomIDs.count)"
+                    ])
+                }
+            }
         }
     }
 
-    private func fetchSpaceChildRoomIDs(for spaceID: SpaceIdentifier) async throws -> Set<String> {
-        let session = try client.session()
-        guard let encodedRoomID = encodedPathComponent(spaceID.rawValue) else { return [] }
-        var components = URLComponents(url: summary.homeserver, resolvingAgainstBaseURL: false)
-        components?.path = "/_matrix/client/v3/rooms/\(encodedRoomID)/state"
-        guard let url = components?.url else { return [] }
+    /// The Matrix SDK has already validated and persisted state delivered by
+    /// `/sync`. This read-only fallback is for federated spaces whose remote
+    /// state endpoint is unavailable through the current homeserver.
+    private func cachedSpaceChildRoomIDs(for spaceID: SpaceIdentifier) -> Set<String> {
+        guard FileManager.default.fileExists(atPath: sdkStateDatabaseURL.path) else { return [] }
+        do {
+            var configuration = Configuration()
+            configuration.readonly = true
+            let databaseQueue = try DatabaseQueue(path: sdkStateDatabaseURL.path, configuration: configuration)
+            return try databaseQueue.read { database in
+                let rows = try Row.fetchAll(
+                    database,
+                    sql: "SELECT CAST(state_key AS TEXT) AS roomID FROM state_event WHERE CAST(room_id AS TEXT) = ? AND CAST(event_type AS TEXT) = 'm.space.child'",
+                    arguments: [spaceID.rawValue]
+                )
+                return Set(rows.compactMap { row in row["roomID"] as String? })
+            }
+        } catch {
+            return []
+        }
+    }
 
+    private func refreshSpaceChildrenFromState(spaceID: SpaceIdentifier) async throws {
+        let childRoomIDs = try await fetchSpaceChildRoomIDs(for: spaceID)
+        await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: childRoomIDs)
+        await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from room state", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRoomIDs.count)"])
+    }
+
+    private func fetchSpaceChildRoomIDs(for spaceID: SpaceIdentifier) async throws -> Set<String> {
+        return Set(
+            try await fetchRoomStateEvents(for: RoomIdentifier(rawValue: spaceID.rawValue))
+                .filter { $0.type == "m.space.child" }
+                .compactMap(\.stateKey)
+        )
+    }
+
+    private func fetchRoomStateEvents(for roomID: RoomIdentifier) async throws -> [MatrixStateEvent] {
+        let session = try client.session()
+        guard let encodedRoomID = encodedPathComponent(roomID.rawValue) else { return [] }
+        var components = URLComponents(url: summary.homeserver, resolvingAgainstBaseURL: false)
+        components?.percentEncodedPath = "/_matrix/client/v1/rooms/\(encodedRoomID)/state"
+        guard let url = components?.url else { return [] }
         var request = URLRequest(url: url)
         request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 30
@@ -1769,14 +1866,9 @@ public actor AccountSessionActor {
         guard let httpResponse = response as? HTTPURLResponse,
               (200 ... 299).contains(httpResponse.statusCode) else {
             let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            throw NSError(domain: "MatrixClient.SpaceState", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Space state request failed with status \(statusCode)."])
+            throw NSError(domain: "MatrixClient.SpaceState", code: statusCode, userInfo: [NSLocalizedDescriptionKey: "Room state request failed with status \(statusCode)."])
         }
-
-        return Set(
-            try JSONDecoder().decode([MatrixStateEvent].self, from: data)
-                .filter { $0.type == "m.space.child" }
-                .compactMap(\.stateKey)
-        )
+        return try JSONDecoder().decode([MatrixStateEvent].self, from: data)
     }
 
     private func applySpaceChildRoomIDs(spaceID: SpaceIdentifier, childRoomIDs: Set<String>) async {
@@ -1807,7 +1899,9 @@ public actor AccountSessionActor {
 
         while true {
             var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-            components?.path = "/_matrix/client/v1/rooms/\(encodedRoomID)/hierarchy"
+            // See the state fallback above: Matrix room IDs must be encoded
+            // once, not once here and again by URLComponents.
+            components?.percentEncodedPath = "/_matrix/client/v1/rooms/\(encodedRoomID)/hierarchy"
             var queryItems = [
                 URLQueryItem(name: "limit", value: "100"),
                 URLQueryItem(name: "suggested_only", value: "false")
@@ -1821,7 +1915,9 @@ public actor AccountSessionActor {
 
             var request = URLRequest(url: url)
             request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
-            request.timeoutInterval = 30
+            // A non-responsive optional hierarchy endpoint must not delay the
+            // reliable state-event fallback used by legacy homeservers.
+            request.timeoutInterval = 8
 
             let (data, response) = try await URLSession.shared.data(for: request)
             if let httpResponse = response as? HTTPURLResponse {
@@ -1939,7 +2035,7 @@ public actor AccountSessionActor {
     private func roomSummary(from hierarchyRoom: SpaceHierarchyRoom, spaceID _: SpaceIdentifier) -> RoomSummary {
         let roomID = RoomIdentifier(rawValue: hierarchyRoom.roomID)
         let membership: RoomMembership
-        if roomItemsByID[roomID] != nil {
+        if roomItemsByID[roomID] != nil || classicRooms[roomID] != nil {
             membership = .joined
         } else {
             membership = .notJoined
