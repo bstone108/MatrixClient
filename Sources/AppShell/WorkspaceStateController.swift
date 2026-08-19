@@ -46,6 +46,9 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     public private(set) var verificationSnapshot: VerificationSnapshot = .initial
     public private(set) var selectedAccountID: AccountIdentifier?
     public private(set) var selectedSpaceID: SpaceIdentifier?
+    /// The space filter used to create the currently displayed room stream.
+    /// This stays stable while sidebar state refreshes asynchronously.
+    public private(set) var displayedSpaceID: SpaceIdentifier?
     public private(set) var selectedRoomID: RoomIdentifier?
     public private(set) var selectedSettingsDestination: WorkspaceSettingsDestination?
     public private(set) var selectedRoomDetails: RoomDetails?
@@ -472,11 +475,13 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         notify(mediaObservers)
 
         guard let selectedAccountID else {
+            displayedSpaceID = nil
             rooms = []
             notify(roomListObservers)
             return
         }
 
+        displayedSpaceID = selectedSpaceID
         let stream = await matrixClient.roomListStream(for: selectedAccountID, spaceID: selectedSpaceID)
         roomListTask = Task { [weak self] in
             guard let self else { return }
@@ -489,7 +494,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
                     }
                 )
                 let effectiveRoomSnapshot: [RoomSummary]
-                if self.selectedSpaceID == nil {
+                if self.displayedSpaceID == nil {
                     effectiveRoomSnapshot = roomSnapshot.filter { !spaceAssignedRoomIDs.contains($0.roomID) }
                 } else {
                     effectiveRoomSnapshot = roomSnapshot
@@ -500,11 +505,10 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
                     let previousSelectedSpaceID = self.selectedSpaceID
                     self.rooms = effectiveRoomSnapshot
                     self.spaces = updatedSpaces
-                    if let selectedSpaceID = self.selectedSpaceID,
-                       !updatedSpaces.contains(where: { $0.spaceID == selectedSpaceID }) {
-                        self.selectedSpaceID = nil
-                        self.persistSelectedSpaceID(nil, for: selectedAccountID)
-                    }
+                    // Space summaries can briefly be absent while the sync
+                    // transport replaces its room snapshot. Keep the user's
+                    // selection stable instead of bouncing them back to the
+                    // top-level room list during that transient state.
                     for room in knownSummaries {
                         self.knownRoomDisplayNames[room.roomID] = room.displayName
                     }

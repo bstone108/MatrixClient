@@ -236,7 +236,7 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     private func rebuildRows() {
-        guard state.selectedSpaceID != nil else {
+        guard state.displayedSpaceID != nil else {
             rows = state.rooms.map(ListRow.room)
             return
         }

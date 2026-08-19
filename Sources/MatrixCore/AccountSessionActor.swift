@@ -264,6 +264,10 @@ public actor AccountSessionActor {
     private var classicSyncListener: ClassicSyncListenerProxy?
     private var classicSyncHandle: TaskHandle?
     private var classicRooms: [RoomIdentifier: Room] = [:]
+    /// Invalidates hierarchy work that was started by Sliding Sync before we
+    /// switch transports.  Those requests can complete after classic `/sync`
+    /// has already established the authoritative set of locally-known rooms.
+    private var spaceHierarchyGeneration = 0
     private var roomListService: RoomListService?
     private var roomList: RoomList?
     private var roomListDynamicEntries: RoomListEntriesWithDynamicAdaptersResult?
@@ -510,6 +514,7 @@ public actor AccountSessionActor {
             roomListService = nil
             self.syncService = nil
             syncTransport = .classicV2
+            spaceHierarchyGeneration += 1
             try await startClassicSync()
             await diagnostics.record(.notice, category: "Sync", message: "Fell back to classic /sync after Sliding Sync produced no rooms", metadata: [
                 "cachedRoomCount": "\(client.rooms().count)"
@@ -1784,21 +1789,30 @@ public actor AccountSessionActor {
     }
 
     private func refreshSpaceHierarchy(for spaceID: SpaceIdentifier) async {
+        let generation = spaceHierarchyGeneration
         do {
             let rooms = try await fetchSpaceHierarchyRooms(for: spaceID)
+            guard generation == spaceHierarchyGeneration else { return }
             let childRooms = rooms.filter { $0.roomID != spaceID.rawValue }
             if childRooms.isEmpty {
-                try await refreshSpaceChildrenFromState(spaceID: spaceID)
+                let childRoomIDs = try await fetchSpaceChildRoomIDs(for: spaceID)
+                guard generation == spaceHierarchyGeneration else { return }
+                await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: childRoomIDs)
+                await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from room state", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRoomIDs.count)"])
             } else {
                 await applySpaceHierarchy(spaceID: spaceID, rooms: childRooms)
                 await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from hierarchy", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRooms.count)"])
             }
         } catch {
+            guard generation == spaceHierarchyGeneration else { return }
             // Conduit may advertise the hierarchy route but not complete its
             // response. The room's `m.space.child` state is sufficient for
             // direct grouping, so use it even when hierarchy itself fails.
             do {
-                try await refreshSpaceChildrenFromState(spaceID: spaceID)
+                let childRoomIDs = try await fetchSpaceChildRoomIDs(for: spaceID)
+                guard generation == spaceHierarchyGeneration else { return }
+                await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: childRoomIDs)
+                await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from room state", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRoomIDs.count)"])
             } catch {
                 let cachedChildRoomIDs = cachedSpaceChildRoomIDs(for: spaceID)
                 if cachedChildRoomIDs.isEmpty {
@@ -1807,10 +1821,12 @@ public actor AccountSessionActor {
                         "error": error.localizedDescription
                     ])
                 } else {
+                    guard generation == spaceHierarchyGeneration else { return }
                     await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: cachedChildRoomIDs)
                     await diagnostics.record(.notice, category: "Spaces", message: "Refreshed space children from synced SDK state", metadata: [
                         "spaceID": spaceID.rawValue,
-                        "childCount": "\(cachedChildRoomIDs.count)"
+                        "linkedChildCount": "\(cachedChildRoomIDs.count)",
+                        "knownChildCount": "\(cachedChildRoomIDs.intersection(Set(classicRooms.keys.map(\.rawValue))).count)"
                     ])
                 }
             }
@@ -1837,12 +1853,6 @@ public actor AccountSessionActor {
         } catch {
             return []
         }
-    }
-
-    private func refreshSpaceChildrenFromState(spaceID: SpaceIdentifier) async throws {
-        let childRoomIDs = try await fetchSpaceChildRoomIDs(for: spaceID)
-        await applySpaceChildRoomIDs(spaceID: spaceID, childRoomIDs: childRoomIDs)
-        await diagnostics.record(.info, category: "Spaces", message: "Refreshed space children from room state", metadata: ["spaceID": spaceID.rawValue, "childCount": "\(childRoomIDs.count)"])
     }
 
     private func fetchSpaceChildRoomIDs(for spaceID: SpaceIdentifier) async throws -> Set<String> {
@@ -1945,7 +1955,21 @@ public actor AccountSessionActor {
     }
 
     private func applySpaceHierarchy(spaceID: SpaceIdentifier, rooms: [SpaceHierarchyRoom]) async {
-        let validRoomIDs = Set(rooms.map(\.roomID))
+        // Never let a Sliding Sync-era refresh clear assignments while classic
+        // `/sync` is still establishing its initial room set.
+        guard syncTransport != .classicV2 || !classicRooms.isEmpty else { return }
+        let hierarchyRoomIDs = Set(rooms.map(\.roomID))
+        // In classic-sync mode, the cached SDK state can contain old or
+        // redacted `m.space.child` events for rooms we no longer know. The
+        // UI requirement is to group *known* rooms only; do not surface stale
+        // children as red, unjoinable preview rows.
+        let validRoomIDs: Set<String>
+        if syncTransport == .classicV2 {
+            let knownRoomIDs = Set(classicRooms.keys.map(\.rawValue))
+            validRoomIDs = hierarchyRoomIDs.intersection(knownRoomIDs)
+        } else {
+            validRoomIDs = hierarchyRoomIDs
+        }
         var changed = false
 
         let previouslyAssignedRoomIDs = discoveredSpaceIDsByRoom.compactMap { roomID, spaceIDs in
@@ -1962,6 +1986,9 @@ public actor AccountSessionActor {
 
         for hierarchyRoom in rooms {
             let roomID = RoomIdentifier(rawValue: hierarchyRoom.roomID)
+            if syncTransport == .classicV2, !validRoomIDs.contains(roomID.rawValue) {
+                continue
+            }
             var memberships = discoveredSpaceIDsByRoom[roomID, default: []]
             let inserted = memberships.insert(spaceID).inserted
             discoveredSpaceIDsByRoom[roomID] = memberships
