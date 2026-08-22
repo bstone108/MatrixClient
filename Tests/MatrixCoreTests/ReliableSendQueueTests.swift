@@ -129,6 +129,48 @@ func thumbnailDownloadPolicyLetsBackgroundBorrowWhenActiveRoomHasNoBacklog() {
 }
 
 @Test
+func mediaBackoffSkipsItemUntilDeadlineWithoutChangingItsEligibilityLater() {
+    let now = Date(timeIntervalSince1970: 1_000)
+    let deadline = now.addingTimeInterval(5)
+    let requeued = MediaDownloadBackoffPolicy.movingToBottom("failed", in: ["failed", "next", "last"])
+
+    #expect(requeued == ["next", "last", "failed"])
+    #expect(!MediaDownloadBackoffPolicy.isEligible(eligibleAt: deadline, now: now))
+    #expect(MediaDownloadBackoffPolicy.isEligible(eligibleAt: deadline, now: deadline))
+    #expect(MediaDownloadBackoffPolicy.eligibleQueueIndices(
+        eligibleAt: [deadline, now, now],
+        now: now
+    ) == [1, 2])
+    #expect(MediaDownloadBackoffPolicy.eligibleQueueIndices(
+        eligibleAt: [deadline, now, now],
+        now: deadline
+    ) == [0, 1, 2])
+    #expect(MediaDownloadBackoffPolicy.retryDelay(afterFailedAttempt: 1) == 5)
+    #expect(MediaDownloadBackoffPolicy.retryDelay(afterFailedAttempt: 2) == 15)
+}
+
+@Test
+func hardMediaTimeoutDoesNotWaitForUnderlyingOperation() async {
+    let clock = ContinuousClock()
+    let start = clock.now
+    var didTimeOut = false
+
+    do {
+        let _: Int = try await withHardThrowingTimeout(.milliseconds(20)) {
+            try await Task.sleep(for: .milliseconds(250))
+            return 1
+        }
+    } catch is MediaFetchTimeoutError {
+        didTimeOut = true
+    } catch {
+        Issue.record("Unexpected timeout error: \(error)")
+    }
+
+    #expect(didTimeOut)
+    #expect(start.duration(to: clock.now) < .milliseconds(150))
+}
+
+@Test
 func originalRegularReservedPolicyKeepsBackgroundOutWhileActiveRoomIsBusy() {
     let decision = MediaDownloadSchedulingPolicy.nextPendingDecision(
         activeRoomID: "!active:test",

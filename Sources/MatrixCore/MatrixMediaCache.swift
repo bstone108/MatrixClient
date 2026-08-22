@@ -9,6 +9,7 @@ public actor MatrixMediaCache {
         static let thumbnailWidth = 720
         static let thumbnailHeight = 720
         static let thumbnailTimeout: Duration = .seconds(12)
+        static let originalTimeout: Duration = .seconds(30)
         static let maxAttempts = 3
     }
 
@@ -35,6 +36,7 @@ public actor MatrixMediaCache {
         let key: DownloadKey
         let item: TimelineItem
         let recoveryOnly: Bool
+        let eligibleAt: Date
     }
 
     private struct RunningDownload {
@@ -61,6 +63,7 @@ public actor MatrixMediaCache {
     private var pendingContinuations: [DownloadKey: CheckedContinuation<Void, Error>] = [:]
     private var runningDownloads: [DownloadKey: RunningDownload] = [:]
     private var suppressedAutomaticDownloads: Set<DownloadKey> = []
+    private var backoffWakeTask: Task<Void, Never>?
     private var isForegroundSession = false
 
     public init(
@@ -257,6 +260,7 @@ public actor MatrixMediaCache {
         let key = DownloadKey(itemID: item.id, variant: variant)
         var allowsImmediateStart = true
         var recoveryOnly = false
+        var eligibleAt = Date.distantPast
 
         for attempt in 1...DownloadTuning.maxAttempts {
             do {
@@ -264,7 +268,8 @@ public actor MatrixMediaCache {
                     for: item,
                     variant: variant,
                     allowsImmediateStart: allowsImmediateStart,
-                    recoveryOnly: recoveryOnly
+                    recoveryOnly: recoveryOnly,
+                    eligibleAt: eligibleAt
                 )
                 allowsImmediateStart = true
                 setLoadingState(for: item, variant: variant, isLoading: true, errorDescription: nil)
@@ -320,10 +325,13 @@ public actor MatrixMediaCache {
                 }
 
                 setLoadingState(for: item, variant: variant, isLoading: false, errorDescription: nil)
+                let backoffSeconds = MediaDownloadBackoffPolicy.retryDelay(afterFailedAttempt: attempt)
+                eligibleAt = Date().addingTimeInterval(backoffSeconds)
                 await diagnostics.record(.notice, category: "Media", message: "Requeued failed media fetch", metadata: [
                     "itemID": item.id,
                     "variant": variant.rawValue,
                     "attempt": "\(attempt)",
+                    "backoffSeconds": "\(Int(backoffSeconds))",
                     "error": error.localizedDescription
                 ])
                 allowsImmediateStart = false
@@ -345,7 +353,7 @@ public actor MatrixMediaCache {
 
         if let thumbnailSource = media.thumbnailSourceJSON.flatMap(Self.mediaSource(from:)) {
             let data = try await performSDKMediaFetch(priority: .thumbnail) {
-                try await withThrowingTimeout(DownloadTuning.thumbnailTimeout) {
+                try await withHardThrowingTimeout(DownloadTuning.thumbnailTimeout) {
                     try await self.client.getMediaThumbnail(
                         mediaSource: thumbnailSource,
                         width: UInt64(DownloadTuning.thumbnailWidth),
@@ -359,7 +367,7 @@ public actor MatrixMediaCache {
 
         let source = try mediaSource(for: media)
         let data = try await performSDKMediaFetch(priority: .thumbnail) {
-            try await withThrowingTimeout(DownloadTuning.thumbnailTimeout) {
+            try await withHardThrowingTimeout(DownloadTuning.thumbnailTimeout) {
                 try await self.client.getMediaThumbnail(
                     mediaSource: source,
                     width: UInt64(DownloadTuning.thumbnailWidth),
@@ -384,13 +392,15 @@ public actor MatrixMediaCache {
 
         let source = try mediaSource(for: media)
         let handle = try await performSDKMediaFetch(priority: .original) {
-            try await self.client.getMediaFile(
-                mediaSource: source,
-                filename: media.filename ?? media.body,
-                mimeType: media.mimeType ?? "application/octet-stream",
-                useCache: true,
-                tempDir: self.roomCacheDirectory(for: item.roomID).path
-            )
+            try await withHardThrowingTimeout(DownloadTuning.originalTimeout) {
+                try await self.client.getMediaFile(
+                    mediaSource: source,
+                    filename: media.filename ?? media.body,
+                    mimeType: media.mimeType ?? "application/octet-stream",
+                    useCache: true,
+                    tempDir: self.roomCacheDirectory(for: item.roomID).path
+                )
+            }
         }
         _ = try handle.persist(path: destinationURL.path)
         return destinationURL
@@ -868,7 +878,8 @@ public actor MatrixMediaCache {
         for item: TimelineItem,
         variant: CacheVariant,
         allowsImmediateStart: Bool = true,
-        recoveryOnly: Bool = false
+        recoveryOnly: Bool = false,
+        eligibleAt: Date = .distantPast
     ) async throws {
         let key = DownloadKey(itemID: item.id, variant: variant)
         if allowsImmediateStart, startDownloadIfPossible(for: item, key: key, recoveryOnly: recoveryOnly) != nil {
@@ -883,10 +894,13 @@ public actor MatrixMediaCache {
                     return
                 }
 
-                pendingDownloads[key] = PendingDownload(key: key, item: item, recoveryOnly: recoveryOnly)
-                if !pendingOrder.contains(key) {
-                    pendingOrder.append(key)
-                }
+                pendingDownloads[key] = PendingDownload(
+                    key: key,
+                    item: item,
+                    recoveryOnly: recoveryOnly,
+                    eligibleAt: eligibleAt
+                )
+                pendingOrder = MediaDownloadBackoffPolicy.movingToBottom(key, in: pendingOrder)
                 pendingContinuations[key] = continuation
                 schedulePendingDownloads()
             }
@@ -914,7 +928,7 @@ public actor MatrixMediaCache {
         guard let lane = MediaDownloadSchedulingPolicy.immediateLane(
             for: item.roomID.rawValue,
             activeRoomID: activeRoomID?.rawValue,
-            pendingRoomIDs: orderedPendingRoomIDs(for: variant),
+            pendingRoomIDs: orderedPendingRoomIDs(for: variant, eligibleOnly: true),
             runningRoomIDs: runningRoomIDs(for: variant),
             policy: workerPolicy(for: variant)
         ) else {
@@ -977,6 +991,7 @@ public actor MatrixMediaCache {
         if !isForegroundSession {
             scheduleInactiveSessionDownloads()
             publishWorkerSnapshots()
+            scheduleBackoffWakeIfNeeded()
             return
         }
 
@@ -991,21 +1006,22 @@ public actor MatrixMediaCache {
             }
         }
         publishWorkerSnapshots()
+        scheduleBackoffWakeIfNeeded()
     }
 
     private func scheduleInactiveSessionDownloads() {
         guard runningDownloads.isEmpty else { return }
-        if let nextThumbnailKey = orderedPendingKeys(for: .thumbnail).first {
+        if let nextThumbnailKey = orderedPendingKeys(for: .thumbnail, eligibleOnly: true).first {
             startPendingDownload(for: nextThumbnailKey, lane: .background)
             return
         }
-        if let nextOriginalKey = orderedPendingKeys(for: .original).first {
+        if let nextOriginalKey = orderedPendingKeys(for: .original, eligibleOnly: true).first {
             startPendingDownload(for: nextOriginalKey, lane: .background)
         }
     }
 
     private func schedulePendingDownloads(for variant: CacheVariant) -> Bool {
-        let orderedKeys = orderedPendingKeys(for: variant)
+        let orderedKeys = orderedPendingKeys(for: variant, eligibleOnly: true)
         let pendingRoomIDs = orderedKeys.compactMap { pendingDownloads[$0]?.item.roomID.rawValue }
         guard let decision = MediaDownloadSchedulingPolicy.nextPendingDecision(
             activeRoomID: activeRoomID?.rawValue,
@@ -1022,7 +1038,7 @@ public actor MatrixMediaCache {
 
     private func scheduleOriginalDownloads() -> Bool {
         if !isRecoveryLaneOccupied(for: .original),
-           let recoveryKey = orderedPendingKeys(for: .original, recoveryOnly: true).first {
+           let recoveryKey = orderedPendingKeys(for: .original, recoveryOnly: true, eligibleOnly: true).first {
             startPendingDownload(for: recoveryKey, lane: .recovery)
             return true
         }
@@ -1032,7 +1048,7 @@ public actor MatrixMediaCache {
         let runningRoomIDs = recoveryBusyWithFailures
             ? runningRoomIDs(for: .original, includeRecoveryLane: false)
             : runningRoomIDs(for: .original, includeRecoveryLane: true)
-        let orderedKeys = orderedPendingKeys(for: .original, recoveryOnly: false)
+        let orderedKeys = orderedPendingKeys(for: .original, recoveryOnly: false, eligibleOnly: true)
         let pendingRoomIDs = orderedKeys.compactMap { pendingDownloads[$0]?.item.roomID.rawValue }
 
         guard let decision = MediaDownloadSchedulingPolicy.nextPendingDecision(
@@ -1085,7 +1101,13 @@ public actor MatrixMediaCache {
     }
 
     private func prioritizePendingDownload(_ key: DownloadKey) {
-        guard pendingDownloads[key] != nil else { return }
+        guard let pending = pendingDownloads[key] else { return }
+        pendingDownloads[key] = PendingDownload(
+            key: pending.key,
+            item: pending.item,
+            recoveryOnly: pending.recoveryOnly,
+            eligibleAt: .distantPast
+        )
         pendingOrder.removeAll { $0 == key }
         pendingOrder.insert(key, at: 0)
         schedulePendingDownloads()
@@ -1104,8 +1126,13 @@ public actor MatrixMediaCache {
         schedulePendingDownloads()
     }
 
-    private func orderedPendingKeys(for variant: CacheVariant? = nil, recoveryOnly: Bool? = nil) -> [DownloadKey] {
-        pendingOrder.filter { key in
+    private func orderedPendingKeys(
+        for variant: CacheVariant? = nil,
+        recoveryOnly: Bool? = nil,
+        eligibleOnly: Bool = false,
+        now: Date = .now
+    ) -> [DownloadKey] {
+        let matchingKeys = pendingOrder.filter { key in
             guard let pending = pendingDownloads[key] else { return false }
             guard let variant else { return true }
             guard pending.key.variant == variant else { return false }
@@ -1114,10 +1141,25 @@ public actor MatrixMediaCache {
             }
             return true
         }
+        guard eligibleOnly else { return matchingKeys }
+
+        let eligibility = matchingKeys.compactMap { pendingDownloads[$0]?.eligibleAt }
+        return MediaDownloadBackoffPolicy.eligibleQueueIndices(
+            eligibleAt: eligibility,
+            now: now
+        ).map { matchingKeys[$0] }
     }
 
-    private func orderedPendingRoomIDs(for variant: CacheVariant, recoveryOnly: Bool? = nil) -> [String] {
-        orderedPendingKeys(for: variant, recoveryOnly: recoveryOnly).compactMap { pendingDownloads[$0]?.item.roomID.rawValue }
+    private func orderedPendingRoomIDs(
+        for variant: CacheVariant,
+        recoveryOnly: Bool? = nil,
+        eligibleOnly: Bool = false
+    ) -> [String] {
+        orderedPendingKeys(
+            for: variant,
+            recoveryOnly: recoveryOnly,
+            eligibleOnly: eligibleOnly
+        ).compactMap { pendingDownloads[$0]?.item.roomID.rawValue }
     }
 
     private func runningRoomIDs(for variant: CacheVariant? = nil, includeRecoveryLane: Bool = true) -> [String] {
@@ -1141,7 +1183,36 @@ public actor MatrixMediaCache {
     }
 
     private func hasPendingRecoveryDownloads(for variant: CacheVariant) -> Bool {
-        orderedPendingKeys(for: variant, recoveryOnly: true).isEmpty == false
+        orderedPendingKeys(for: variant, recoveryOnly: true, eligibleOnly: true).isEmpty == false
+    }
+
+    private func scheduleBackoffWakeIfNeeded() {
+        backoffWakeTask?.cancel()
+        backoffWakeTask = nil
+
+        let now = Date()
+        guard let nextEligibility = pendingDownloads.values
+            .map(\.eligibleAt)
+            .filter({ $0 > now })
+            .min() else {
+            return
+        }
+
+        let delay = max(0, nextEligibility.timeIntervalSince(now))
+        backoffWakeTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .seconds(delay))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await self?.backoffWakeTimerFired()
+        }
+    }
+
+    private func backoffWakeTimerFired() {
+        backoffWakeTask = nil
+        schedulePendingDownloads()
     }
 
     private func workerPolicy(for variant: CacheVariant) -> MediaDownloadWorkerPolicy {
@@ -1304,22 +1375,97 @@ public actor MatrixMediaCache {
     }
 }
 
-private func withThrowingTimeout<T: Sendable>(
+func withHardThrowingTimeout<T: Sendable>(
     _ duration: Duration,
     operation: @escaping @Sendable () async throws -> T
 ) async throws -> T {
-    try await withThrowingTaskGroup(of: T.self) { group in
-        group.addTask {
-            try await operation()
-        }
-        group.addTask {
-            try await Task.sleep(for: duration)
-            throw MediaFetchTimeoutError()
-        }
+    let race = ThrowingTimeoutRace<T>()
+    return try await withTaskCancellationHandler {
+        try await withCheckedThrowingContinuation { continuation in
+            race.install(continuation)
+            if Task.isCancelled {
+                race.resolve(.failure(CancellationError()))
+                return
+            }
 
-        let result = try await group.next()!
-        group.cancelAll()
-        return result
+            Task {
+                do {
+                    race.resolve(.success(try await operation()))
+                } catch {
+                    race.resolve(.failure(error))
+                }
+            }
+            Task {
+                do {
+                    try await Task.sleep(for: duration)
+                    race.resolve(.failure(MediaFetchTimeoutError()))
+                } catch {
+                    // The timer is allowed to disappear if its parent is
+                    // cancelled; the cancellation handler resolves the race.
+                }
+            }
+        }
+    } onCancel: {
+        race.resolve(.failure(CancellationError()))
+    }
+}
+
+private final class ThrowingTimeoutRace<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var pendingResult: Result<Value, Error>?
+    private var isResolved = false
+
+    func install(_ continuation: CheckedContinuation<Value, Error>) {
+        lock.lock()
+        if let pendingResult {
+            self.pendingResult = nil
+            lock.unlock()
+            continuation.resume(with: pendingResult)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func resolve(_ result: Result<Value, Error>) {
+        lock.lock()
+        guard !isResolved else {
+            lock.unlock()
+            return
+        }
+        isResolved = true
+        guard let continuation else {
+            pendingResult = result
+            lock.unlock()
+            return
+        }
+        self.continuation = nil
+        lock.unlock()
+        continuation.resume(with: result)
+    }
+}
+
+enum MediaDownloadBackoffPolicy {
+    static func retryDelay(afterFailedAttempt attempt: Int) -> TimeInterval {
+        switch attempt {
+        case 1: 5
+        default: 15
+        }
+    }
+
+    static func isEligible(eligibleAt: Date, now: Date) -> Bool {
+        eligibleAt <= now
+    }
+
+    static func movingToBottom<Item: Equatable>(_ item: Item, in queue: [Item]) -> [Item] {
+        queue.filter { $0 != item } + [item]
+    }
+
+    static func eligibleQueueIndices(eligibleAt: [Date], now: Date) -> [Int] {
+        eligibleAt.enumerated().compactMap { index, deadline in
+            isEligible(eligibleAt: deadline, now: now) ? index : nil
+        }
     }
 }
 
@@ -1459,7 +1605,7 @@ private enum MediaCacheError: LocalizedError {
     }
 }
 
-private struct MediaFetchTimeoutError: LocalizedError {
+struct MediaFetchTimeoutError: LocalizedError {
     var errorDescription: String? {
         "Media fetch timed out."
     }
