@@ -362,6 +362,8 @@ xcodebuild \
   -configuration Release \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
   "CONFIGURATION_BUILD_DIR=${STAGING_BUILD_DIR}" \
+  ARCHS="${ARCH}" \
+  ONLY_ACTIVE_ARCH=YES \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   build

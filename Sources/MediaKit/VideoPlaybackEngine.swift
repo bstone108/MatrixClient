@@ -21,17 +21,16 @@ public final class ImagePreviewPipeline {
             "url": url.lastPathComponent
         ])
 
-        return await Task.detached(priority: .utility) {
+        let cgImage = await Task.detached(priority: .utility) { () -> CGImage? in
             guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
             ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                return nil
-            }
-            return NSImage(cgImage: cgImage, size: .zero)
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
         }.value
+        guard let cgImage else { return nil }
+        return NSImage(cgImage: cgImage, size: .zero)
     }
 }

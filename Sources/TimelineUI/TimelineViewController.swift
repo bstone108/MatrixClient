@@ -551,20 +551,22 @@ final class TimelineMediaCellView: NSTableCellView {
     }
 
     private static func previewImage(for url: URL, maxPixelSize: CGFloat) async -> NSImage? {
-        await Task.detached(priority: .utility) {
-            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-                return NSImage(contentsOf: url)
-            }
+        let cgImage = await Task.detached(priority: .utility) { () -> CGImage? in
+            guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
             let options: [CFString: Any] = [
                 kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceCreateThumbnailWithTransform: true,
                 kCGImageSourceThumbnailMaxPixelSize: maxPixelSize
             ]
-            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
-                return NSImage(contentsOf: url)
-            }
-            return NSImage(cgImage: cgImage, size: .zero)
+            return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
         }.value
+        if let cgImage {
+            return NSImage(cgImage: cgImage, size: .zero)
+        }
+        let data = await Task.detached(priority: .utility) {
+            try? Data(contentsOf: url)
+        }.value
+        return data.flatMap { NSImage(data: $0) }
     }
 }
 
