@@ -1,0 +1,91 @@
+name: macOS Release
+
+on:
+  pull_request:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos:
+    name: Sign, notarize, and staple
+    runs-on: macos-15
+    outputs:
+      app_version: ${{ steps.package.outputs.app_version }}
+      arch: ${{ steps.package.outputs.arch }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: ./scripts/import-apple-signing-cert.sh
+
+      - name: Build, sign, notarize, and staple
+        id: package
+        env:
+          MACOS_CODESIGN_IDENTITY: "Developer ID Application: BRANDON BROWNING STONE (K6N4J68LTY)"
+          MACOS_REQUIRE_NOTARIZATION: "1"
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: ./scripts/package-macos.sh
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v6
+        with:
+          name: MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}
+          path: |
+            build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}.zip
+            build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}.dmg
+            build/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Delete signing keychain
+        if: always()
+        run: |
+          if [[ -n "${MACOS_SIGNING_KEYCHAIN_PATH:-}" ]]; then
+            security delete-keychain "${MACOS_SIGNING_KEYCHAIN_PATH}" || true
+          fi
+          rm -f "${MACOS_SIGNING_CERTIFICATE_PATH:-}"
+
+  publish-release:
+    name: Publish GitHub release
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: build-macos
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: MatrixClient-${{ needs.build-macos.outputs.app_version }}-macos-${{ needs.build-macos.outputs.arch }}
+          path: release-artifacts/macos
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          APP_VERSION: ${{ needs.build-macos.outputs.app_version }}
+        run: |
+          set -euo pipefail
+          tag="v${APP_VERSION}"
+          title="MatrixClient ${APP_VERSION}"
+          notes="Developer ID-signed and notarized macOS build for ${APP_VERSION}."
+          mapfile -d '' assets < <(find release-artifacts -type f -print0)
+          if gh release view "${tag}" --repo "${GH_REPO}" >/dev/null 2>&1; then
+            gh release edit "${tag}" --repo "${GH_REPO}" --title "${title}" --notes "${notes}" --latest
+            gh release upload "${tag}" --repo "${GH_REPO}" "${assets[@]}" --clobber
+          else
+            gh release create "${tag}" --repo "${GH_REPO}" "${assets[@]}" --title "${title}" --notes "${notes}" --latest --target "${GITHUB_SHA}"
+          fi
