@@ -344,7 +344,14 @@ assemble_app_bundle() {
   done
   shopt -u nullglob
 
-  local mediakit_frameworks_dir="${app_frameworks_dir}/MediaKit.framework/Versions/Frameworks"
+  # Nested frameworks belong in Versions/<version>/Frameworks. A directory named
+  # Versions/Frameworks is treated as an invalid version and fails
+  # `codesign --verify --deep --strict`.
+  local mediakit_version_dir="${app_frameworks_dir}/MediaKit.framework/Versions/Current"
+  if [[ ! -e "${mediakit_version_dir}" ]]; then
+    mediakit_version_dir="${app_frameworks_dir}/MediaKit.framework/Versions/A"
+  fi
+  local mediakit_frameworks_dir="${mediakit_version_dir}/Frameworks"
   mkdir -p "${mediakit_frameworks_dir}"
   if [[ -d "${app_frameworks_dir}/VLCKit.framework" ]]; then
     copy_tree "${app_frameworks_dir}/VLCKit.framework" "${mediakit_frameworks_dir}/VLCKit.framework"
