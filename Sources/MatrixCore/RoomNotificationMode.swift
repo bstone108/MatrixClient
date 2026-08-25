@@ -74,7 +74,7 @@ public enum MatrixMentionMatcher: Sendable {
     }
 }
 
-public struct RoomNotificationPreferenceStore: Sendable {
+public struct RoomNotificationPreferenceStore {
     public static let keyPrefix = "Workspace.notifications.roomMode."
 
     public static func defaultsKey(accountID: AccountIdentifier, roomID: RoomIdentifier) -> String {
