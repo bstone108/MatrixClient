@@ -181,6 +181,16 @@ public actor MatrixClientService: MatrixClientFacade {
         return await session.timelineStream(roomID: roomID)
     }
 
+    public func timelineHistoryStatusStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<TimelineHistoryStatus> {
+        guard let session = sessions[accountID] else { return AsyncStream { _ in } }
+        return await session.timelineHistoryStatusStream(roomID: roomID)
+    }
+
+    public func paginateOlderHistory(in roomID: RoomIdentifier, accountID: AccountIdentifier) async {
+        guard let session = sessions[accountID] else { return }
+        await session.paginateOlderHistory(roomID: roomID)
+    }
+
     public func mediaStateStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<[String: TimelineMediaLoadState]> {
         guard let session = sessions[accountID] else { return AsyncStream { _ in } }
         return await session.mediaStateStream(roomID: roomID)
@@ -290,16 +300,37 @@ public actor MatrixClientService: MatrixClientFacade {
         try await session.joinRoom(roomID)
     }
 
-    public func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async {
-        guard let session = sessions[accountID] else { return }
+    public func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {
+        guard let session = sessions[accountID] else {
+            throw MatrixSendError.missingSelection
+        }
         do {
             try await session.sendMessage(body, roomID: roomID)
         } catch {
-            await diagnostics.record(.error, category: "Timeline", message: "Failed to enqueue message", metadata: [
+            await diagnostics.record(.error, category: "Timeline", message: "Failed to send message", metadata: [
                 "roomID": roomID.rawValue,
                 "accountID": accountID.rawValue,
                 "error": error.localizedDescription
             ])
+            throw error
+        }
+    }
+
+    public func sendMedia(_ attachment: OutgoingMediaAttachment, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {
+        guard let session = sessions[accountID] else {
+            throw MatrixSendError.missingSelection
+        }
+        do {
+            try await session.sendMedia(attachment, roomID: roomID)
+        } catch {
+            await diagnostics.record(.error, category: "Timeline", message: "Failed to send file", metadata: [
+                "roomID": roomID.rawValue,
+                "accountID": accountID.rawValue,
+                "filename": attachment.filename,
+                "mimeType": attachment.mimeType,
+                "error": error.localizedDescription
+            ])
+            throw error
         }
     }
 

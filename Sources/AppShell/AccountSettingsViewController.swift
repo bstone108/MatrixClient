@@ -44,6 +44,8 @@ final class AccountSettingsViewController: NSViewController {
         addAccountButton.target = self
         addAccountButton.action = #selector(addAccount(_:))
         addAccountButton.bezelStyle = .rounded
+        addAccountButton.keyEquivalent = "\r"
+        addAccountButton.setAccessibilityLabel("Add account")
 
         removeCurrentButton.target = self
         removeCurrentButton.action = #selector(removeCurrentAccount(_:))

@@ -7,16 +7,24 @@ import MediaKit
 @MainActor
 public protocol TimelineWorkspaceState: AnyObject {
     var timelineItems: [TimelineItem] { get }
+    var timelineHistoryStatus: TimelineHistoryStatus { get }
     var selectedRoomSummary: RoomSummary? { get }
+    var composerNotice: String? { get }
     func addTimelineObserver(_ observer: @escaping @MainActor () -> Void)
     func addMediaObserver(_ observer: @escaping @MainActor () -> Void)
     func addSelectionObserver(_ observer: @escaping @MainActor () -> Void)
+    func addComposerNoticeObserver(_ observer: @escaping @MainActor () -> Void)
+    func addRoomListObserver(_ observer: @escaping @MainActor () -> Void)
     func mediaState(for itemID: String) -> TimelineMediaLoadState?
     func prepareMedia(for item: TimelineItem, prefetchOriginal: Bool)
     func resolveOriginalMediaURL(for item: TimelineItem) async -> URL?
     func resolveReceiptAvatarFileURL(for receipt: ReadReceipt) async -> URL?
     func markSelectedRoomAsRead()
     func sendMessage(_ body: String)
+    func sendMedia(_ attachment: OutgoingMediaAttachment)
+    func joinSelectedRoom()
+    func presentComposerNotice(_ message: String?)
+    func loadOlderTimelineHistory()
 }
 
 final class ReceiptAvatarBadgeView: NSView {
@@ -246,14 +254,19 @@ final class TimelineMessageCellView: NSTableCellView {
     private let bodyField = NSTextField(wrappingLabelWithString: "")
     private let metaField = NSTextField(labelWithString: "")
     private let receiptStripView = ReadReceiptStripView()
+    private let bubbleView = NSView(frame: .zero)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        senderField.font = .boldSystemFont(ofSize: 12)
+        senderField.font = .systemFont(ofSize: 12, weight: .semibold)
         bodyField.font = .systemFont(ofSize: 13)
         bodyField.maximumNumberOfLines = 0
         metaField.font = .systemFont(ofSize: 11)
         metaField.textColor = .secondaryLabelColor
+
+        bubbleView.wantsLayer = true
+        bubbleView.layer?.cornerRadius = 12
+        bubbleView.translatesAutoresizingMaskIntoConstraints = false
 
         let metaRow = NSStackView(views: [metaField, NSView(), receiptStripView])
         metaRow.orientation = .horizontal
@@ -264,15 +277,20 @@ final class TimelineMessageCellView: NSTableCellView {
         let stack = NSStackView(views: [senderField, bodyField, metaRow])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 4
+        stack.spacing = 3
         stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(bubbleView)
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            bubbleView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            bubbleView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            bubbleView.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            bubbleView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
+            stack.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor, constant: 10),
+            stack.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -10),
+            stack.topAnchor.constraint(equalTo: bubbleView.topAnchor, constant: 8),
+            stack.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor, constant: -8),
             metaRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
     }
@@ -292,6 +310,9 @@ final class TimelineMessageCellView: NSTableCellView {
             receipts: item.isOwnMessage ? item.receipts.readReceipts : [],
             avatarResolver: avatarResolver
         )
+        bubbleView.layer?.backgroundColor = (item.isOwnMessage
+            ? NSColor.controlAccentColor.withAlphaComponent(0.12)
+            : NSColor.separatorColor.withAlphaComponent(0.18)).cgColor
     }
 }
 
@@ -336,7 +357,8 @@ final class TimelineStatusCellView: NSTableCellView {
 
 final class TimelineMediaCellView: NSTableCellView {
     private enum Layout {
-        static let previewHeight: CGFloat = 220
+        static let imagePreviewHeight: CGFloat = 168
+        static let compactPreviewHeight: CGFloat = 44
     }
 
     private let senderField = NSTextField(labelWithString: "")
@@ -352,12 +374,13 @@ final class TimelineMediaCellView: NSTableCellView {
     private var previewSourceURL: URL?
     private var hasResolvedPreviewImage = false
     private var previewTask: Task<Void, Never>?
+    private var previewHeightConstraint: NSLayoutConstraint?
     var onOpenRequested: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
 
-        senderField.font = .boldSystemFont(ofSize: 12)
+        senderField.font = .systemFont(ofSize: 12, weight: .semibold)
         captionField.font = .systemFont(ofSize: 13)
         captionField.maximumNumberOfLines = 0
         metaField.font = .systemFont(ofSize: 11)
@@ -370,10 +393,9 @@ final class TimelineMediaCellView: NSTableCellView {
         previewButton.imagePosition = .imageOnly
         previewButton.imageScaling = .scaleProportionallyUpOrDown
         previewButton.wantsLayer = true
-        previewButton.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        previewButton.layer?.backgroundColor = NSColor.separatorColor.withAlphaComponent(0.12).cgColor
         previewButton.layer?.cornerRadius = 10
-        previewButton.layer?.borderWidth = 1
-        previewButton.layer?.borderColor = NSColor.separatorColor.cgColor
+        previewButton.layer?.borderWidth = 0
         previewButton.translatesAutoresizingMaskIntoConstraints = false
         previewButton.target = self
         previewButton.action = #selector(openRequested)
@@ -402,18 +424,21 @@ final class TimelineMediaCellView: NSTableCellView {
         let stack = NSStackView(views: [senderField, previewButton, captionField, metaRow, progressStack])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
+
+        previewHeightConstraint = previewButton.heightAnchor.constraint(equalToConstant: Layout.imagePreviewHeight)
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
-            previewButton.heightAnchor.constraint(equalToConstant: Layout.previewHeight),
-            previewButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 320),
-            progressIndicator.widthAnchor.constraint(equalToConstant: 180),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            previewHeightConstraint!,
+            previewButton.widthAnchor.constraint(lessThanOrEqualTo: stack.widthAnchor),
+            previewButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 160),
+            progressIndicator.widthAnchor.constraint(equalToConstant: 140),
             metaRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
     }
@@ -452,9 +477,12 @@ final class TimelineMediaCellView: NSTableCellView {
 
         switch item.media?.kind {
         case .image, .video:
+            let hasPreview = mediaState?.thumbnailFileURL != nil || mediaState?.originalFileURL != nil
+            previewHeightConstraint?.constant = hasPreview ? Layout.imagePreviewHeight : Layout.compactPreviewHeight
             openButton.isHidden = true
             previewButton.toolTip = mediaState?.originalFileURL == nil ? "Fetch and open original" : "Open original"
         case .audio, .file, .none:
+            previewHeightConstraint?.constant = Layout.compactPreviewHeight
             openButton.isHidden = false
             openButton.title = mediaState?.originalFileURL == nil ? "Fetch File" : "Open File"
             previewButton.toolTip = openButton.title
@@ -522,8 +550,11 @@ final class TimelineMediaCellView: NSTableCellView {
                 guard self.representedItemID == itemID, self.previewSourceURL == previewURL else { return }
                 if let image {
                     self.previewButton.image = image
+                    self.previewButton.title = ""
+                    self.previewButton.imagePosition = .imageOnly
                     self.previewButton.contentTintColor = nil
                     self.hasResolvedPreviewImage = true
+                    self.previewHeightConstraint?.constant = Layout.imagePreviewHeight
                 } else if !self.hasResolvedPreviewImage {
                     self.setFallbackPreview(for: item)
                 }
@@ -548,6 +579,11 @@ final class TimelineMediaCellView: NSTableCellView {
         fallbackImage?.isTemplate = true
         previewButton.image = fallbackImage
         previewButton.contentTintColor = .secondaryLabelColor
+        previewButton.imagePosition = item.media?.kind == .image || item.media?.kind == .video ? .imageOnly : .imageLeading
+        previewButton.title = item.media?.kind == .file || item.media?.kind == .audio
+            ? TimelineCellFormatting.mediaCaption(for: item)
+            : ""
+        previewButton.layer?.borderWidth = 0
     }
 
     private static func previewImage(for url: URL, maxPixelSize: CGFloat) async -> NSImage? {
@@ -637,29 +673,40 @@ enum TimelineCellFormatting {
     }
 }
 
-public final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate {
+public final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, ComposerBarHosting, NSMenuItemValidation {
     private enum Layout {
-        static let messageBaseHeight: CGFloat = 82
-        static let statusBaseHeight: CGFloat = 58
-        static let mediaBaseHeight: CGFloat = 332
-        static let mediaExtraLineHeight: CGFloat = 16
-        static let messageExtraLineHeight: CGFloat = 16
+        static let messageBaseHeight: CGFloat = 72
+        static let statusBaseHeight: CGFloat = 52
+        static let imageMediaBaseHeight: CGFloat = 248
+        static let compactMediaBaseHeight: CGFloat = 118
+        static let mediaExtraLineHeight: CGFloat = 14
+        static let messageExtraLineHeight: CGFloat = 14
+        /// Distance from the bottom of the document that counts as "at the bottom"
+        /// for follow-lock and the jump-to-latest control.
         static let autoScrollThreshold: CGFloat = 36
-        static let composerMinHeight: CGFloat = 38
-        static let composerMaxHeight: CGFloat = 160
+        static let jumpToLatestInset: CGFloat = 12
     }
 
     private let state: any TimelineWorkspaceState
     private let videoPlaybackEngine: any VideoPlaybackEngine
     private let titleField = NSTextField(labelWithString: "No Room Selected")
+    private let subtitleField = NSTextField(labelWithString: "")
+    private let historyBannerField = NSTextField(labelWithString: "")
+    private let emptyField = NSTextField(wrappingLabelWithString: "")
     private let tableView = NSTableView(frame: .zero)
-    private let scrollView = NSScrollView(frame: .zero)
-    private let composerScrollView = NSScrollView(frame: .zero)
-    private let composerTextView = NSTextView(frame: .zero)
-    private let sendButton = NSButton(title: "Send", target: nil, action: nil)
-    private var composerHeightConstraint: NSLayoutConstraint?
+    private let scrollView = FileDropScrollView(frame: .zero)
+    private let timelinePane = NSView(frame: .zero)
+    private let jumpToLatestButton = JumpToLatestButton()
+    private let composerBar = ComposerBarView()
     private var scrollObserver: NSObjectProtocol?
+    private var windowObserver: NSObjectProtocol?
     private var pendingReadMarkTask: Task<Void, Never>?
+    private var pendingAttachments: [OutgoingMediaAttachment] = []
+    private var didFocusComposerForCurrentRoom = false
+    private var isRestoringScroll = false
+    private var paginationDebounceTask: Task<Void, Never>?
+    private var liveFollow = TimelineLiveFollowPolicy()
+    private var trackedRoomID: String?
 
     private var previewControllers: [MediaPreviewWindowController] = []
 
@@ -674,65 +721,87 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     public override func loadView() {
-        let root = NSView()
+        let root = FileDropView()
         root.translatesAutoresizingMaskIntoConstraints = false
+        root.onDrop = { [weak self] urls in
+            self?.enqueueAttachments(from: urls)
+        }
 
-        titleField.font = .systemFont(ofSize: 20, weight: .semibold)
+        titleField.font = .systemFont(ofSize: 18, weight: .semibold)
+        subtitleField.font = .systemFont(ofSize: 12)
+        subtitleField.textColor = .secondaryLabelColor
+        historyBannerField.font = .systemFont(ofSize: 11, weight: .medium)
+        historyBannerField.textColor = .secondaryLabelColor
+        historyBannerField.isHidden = true
+        emptyField.font = .systemFont(ofSize: 13)
+        emptyField.textColor = .secondaryLabelColor
+        emptyField.alignment = .center
+        emptyField.maximumNumberOfLines = 0
+        emptyField.isHidden = true
+
+        let headerStack = NSStackView(views: [titleField, subtitleField])
+        headerStack.orientation = .vertical
+        headerStack.alignment = .leading
+        headerStack.spacing = 2
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("timeline"))
         tableView.addTableColumn(column)
         tableView.headerView = nil
-        tableView.intercellSpacing = NSSize(width: 0, height: 8)
+        tableView.intercellSpacing = NSSize(width: 0, height: 4)
         tableView.delegate = self
         tableView.dataSource = self
         tableView.selectionHighlightStyle = .none
+        tableView.backgroundColor = .textBackgroundColor
+        tableView.usesAlternatingRowBackgroundColors = false
+        tableView.refusesFirstResponder = true
 
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = true
+        scrollView.backgroundColor = .textBackgroundColor
         scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollView.onDrop = { [weak self] urls in
+            self?.enqueueAttachments(from: urls)
+        }
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.setContentHuggingPriority(.init(1), for: .vertical)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
 
-        composerTextView.font = .systemFont(ofSize: 14)
-        composerTextView.isRichText = false
-        composerTextView.usesFindPanel = false
-        composerTextView.isHorizontallyResizable = false
-        composerTextView.isVerticallyResizable = true
-        composerTextView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        composerTextView.textContainer?.widthTracksTextView = true
-        composerTextView.textContainer?.heightTracksTextView = false
-        composerTextView.textContainer?.lineFragmentPadding = 0
-        composerTextView.textContainerInset = NSSize(width: 0, height: 7)
-        composerTextView.delegate = self
+        jumpToLatestButton.target = self
+        jumpToLatestButton.action = #selector(jumpToLatestMessages)
+        jumpToLatestButton.isHidden = true
 
-        composerScrollView.documentView = composerTextView
-        composerScrollView.hasVerticalScroller = false
-        composerScrollView.autohidesScrollers = true
-        composerScrollView.borderType = .bezelBorder
+        timelinePane.translatesAutoresizingMaskIntoConstraints = false
+        timelinePane.wantsLayer = true
+        timelinePane.setContentHuggingPriority(.init(1), for: .vertical)
+        timelinePane.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        timelinePane.addSubview(scrollView)
+        timelinePane.addSubview(jumpToLatestButton)
+        jumpToLatestButton.layer?.zPosition = 10
 
-        sendButton.target = self
-        sendButton.action = #selector(sendCurrentDraft)
-        sendButton.keyEquivalent = "\r"
+        composerBar.host = self
 
-        let composerRow = NSStackView(views: [composerScrollView, sendButton])
-        composerRow.orientation = .horizontal
-        composerRow.alignment = .top
-        composerRow.spacing = 12
-
-        let stack = NSStackView(views: [titleField, scrollView, composerRow])
+        let stack = NSStackView(views: [headerStack, historyBannerField, timelinePane, emptyField, composerBar])
         stack.orientation = .vertical
-        stack.spacing = 12
+        stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
-
-        composerHeightConstraint = composerScrollView.heightAnchor.constraint(equalToConstant: Layout.composerMinHeight)
 
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
             stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
-            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 16),
-            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
-            composerHeightConstraint!,
-            sendButton.widthAnchor.constraint(equalToConstant: 88)
+            stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
+            stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+            headerStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            composerBar.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            timelinePane.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: timelinePane.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: timelinePane.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: timelinePane.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: timelinePane.bottomAnchor),
+            jumpToLatestButton.trailingAnchor.constraint(equalTo: timelinePane.trailingAnchor, constant: -Layout.jumpToLatestInset),
+            jumpToLatestButton.bottomAnchor.constraint(equalTo: timelinePane.bottomAnchor, constant: -Layout.jumpToLatestInset)
         ])
 
         view = root
@@ -749,6 +818,16 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
                 self?.handleTimelineScroll()
             }
         }
+        windowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, self.view.window?.isKeyWindow == true else { return }
+                self.focusComposerIfNeeded(force: false)
+            }
+        }
         state.addTimelineObserver { [weak self] in
             self?.reloadTimeline()
         }
@@ -758,10 +837,24 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         state.addSelectionObserver { [weak self] in
             self?.reloadSelection()
         }
+        state.addRoomListObserver { [weak self] in
+            self?.reloadSelection()
+        }
+        state.addComposerNoticeObserver { [weak self] in
+            self?.reloadComposer()
+        }
         reloadSelection()
         reloadTimeline()
-        updateComposerHeight()
+        composerBar.updateComposerHeight()
     }
+
+    public override func viewDidAppear() {
+        super.viewDidAppear()
+        reloadComposer()
+        focusComposerIfNeeded(force: true)
+    }
+
+    public override var acceptsFirstResponder: Bool { true }
 
     public override func viewWillDisappear() {
         super.viewWillDisappear()
@@ -769,13 +862,19 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             NotificationCenter.default.removeObserver(scrollObserver)
             self.scrollObserver = nil
         }
+        if let windowObserver {
+            NotificationCenter.default.removeObserver(windowObserver)
+            self.windowObserver = nil
+        }
         pendingReadMarkTask?.cancel()
         pendingReadMarkTask = nil
+        paginationDebounceTask?.cancel()
+        paginationDebounceTask = nil
     }
 
     public override func viewDidLayout() {
         super.viewDidLayout()
-        updateComposerHeight()
+        composerBar.updateComposerHeight()
     }
 
     public func numberOfRows(in tableView: NSTableView) -> Int {
@@ -789,9 +888,18 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             let extraLines = max(0, CGFloat(item.body.count / 90))
             return Layout.statusBaseHeight + (extraLines * Layout.messageExtraLineHeight)
         case .message:
-            if item.media != nil {
+            if let media = item.media {
                 let extraLines = max(0, CGFloat(item.body.count / 72))
-                return Layout.mediaBaseHeight + (extraLines * Layout.mediaExtraLineHeight)
+                let mediaState = state.mediaState(for: item.id)
+                let hasPreview = mediaState?.thumbnailFileURL != nil || mediaState?.originalFileURL != nil
+                let base: CGFloat
+                switch media.kind {
+                case .image, .video:
+                    base = hasPreview ? Layout.imageMediaBaseHeight : Layout.compactMediaBaseHeight
+                case .audio, .file:
+                    base = Layout.compactMediaBaseHeight
+                }
+                return base + (extraLines * Layout.mediaExtraLineHeight)
             }
             let extraLines = max(0, CGFloat(item.body.count / 72))
             return Layout.messageBaseHeight + (extraLines * Layout.messageExtraLineHeight)
@@ -840,49 +948,150 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     @objc
+    public func attachFile(_ sender: Any?) {
+        composerDidRequestAttach()
+    }
+
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(attachFile(_:)) {
+            return state.selectedRoomSummary?.membership == .joined
+        }
+        return true
+    }
+
+    func composerDraftDidChange() {}
+
+    func composerDidRequestSend() {
+        sendCurrentDraft()
+    }
+
+    func composerDidRequestAttach() {
+        guard state.selectedRoomSummary?.membership == .joined else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Attach"
+        panel.message = "Choose files to send to this room."
+        let present: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard response == .OK else { return }
+            Task { @MainActor [weak self] in
+                self?.enqueueAttachments(from: panel.urls)
+            }
+        }
+        if let window = view.window {
+            panel.beginSheetModal(for: window, completionHandler: present)
+        } else {
+            panel.begin(completionHandler: present)
+        }
+    }
+
+    func composerDidReceiveDroppedFiles(_ urls: [URL]) {
+        enqueueAttachments(from: urls)
+    }
+
+    func composerDidRequestJoin() {
+        state.joinSelectedRoom()
+    }
+
+    func composerDidRemovePendingAttachment(at index: Int) {
+        guard pendingAttachments.indices.contains(index) else { return }
+        pendingAttachments.remove(at: index)
+        reloadComposer()
+        focusComposerIfNeeded(force: true)
+    }
+
+    @objc
     private func sendCurrentDraft() {
         guard state.selectedRoomSummary?.membership == .joined else { return }
-        let body = composerTextView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return }
-        state.sendMessage(body)
-        composerTextView.string = ""
-        updateComposerHeight()
+        let body = composerBar.draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attachments = pendingAttachments
+        guard !body.isEmpty || !attachments.isEmpty else { return }
+
+        if !attachments.isEmpty {
+            let caption = body.isEmpty ? nil : body
+            for (index, attachment) in attachments.enumerated() {
+                state.sendMedia(attachment.withCaption(index == 0 ? caption : nil))
+            }
+            pendingAttachments = []
+            composerBar.draft = ""
+        } else {
+            state.sendMessage(body)
+            composerBar.draft = ""
+        }
+        reloadComposer()
+        focusComposerIfNeeded(force: true)
     }
 
     private func reloadSelection() {
+        let previousRoomID = titleField.toolTip
         if let summary = state.selectedRoomSummary {
-            if summary.membership == .notJoined {
-                titleField.stringValue = "\(summary.displayName)  •  Not Joined"
-            } else if summary.membership == .invited {
-                titleField.stringValue = "\(summary.displayName)  •  Invited"
-            } else {
-                titleField.stringValue = summary.displayName
+            titleField.stringValue = summary.displayName
+            switch summary.membership {
+            case .notJoined:
+                subtitleField.stringValue = summary.topic.isEmpty ? "Not joined" : "Not joined  •  \(summary.topic)"
+            case .invited:
+                subtitleField.stringValue = summary.topic.isEmpty ? "Invited" : "Invited  •  \(summary.topic)"
+            case .left:
+                subtitleField.stringValue = "You left this room"
+            case .joined:
+                subtitleField.stringValue = summary.topic
+            }
+            titleField.toolTip = summary.roomID.rawValue
+            if previousRoomID != summary.roomID.rawValue {
+                didFocusComposerForCurrentRoom = false
+                pendingAttachments = []
+                liveFollow.resetForSelectedRoomChange()
+                trackedRoomID = summary.roomID.rawValue
             }
         } else {
             titleField.stringValue = "No Room Selected"
+            subtitleField.stringValue = ""
+            titleField.toolTip = nil
+            didFocusComposerForCurrentRoom = false
+            pendingAttachments = []
+            if trackedRoomID != nil {
+                liveFollow.resetForSelectedRoomChange()
+                trackedRoomID = nil
+            }
         }
-        updateComposerAvailability()
+        subtitleField.isHidden = subtitleField.stringValue.isEmpty
+        if let root = view as? FileDropView {
+            root.isDropEnabled = state.selectedRoomSummary?.membership == .joined
+        }
+        scrollView.isDropEnabled = state.selectedRoomSummary?.membership == .joined
+        reloadComposer()
+        updateEmptyState()
+        updateHistoryBanner()
+        updateJumpToLatestButtonVisibility()
+        focusComposerIfNeeded(force: !didFocusComposerForCurrentRoom)
+    }
+
+    private func reloadComposer() {
+        composerBar.configure(
+            summary: state.selectedRoomSummary,
+            notice: state.composerNotice,
+            pendingAttachments: pendingAttachments
+        )
     }
 
     private func reloadTimeline() {
-        let clipView = scrollView.contentView
-        let previousVisibleRect = clipView.documentVisibleRect
-        let previousOffset = clipView.bounds.origin.y
-        let wasAtBottom = previousVisibleRect.maxY >= max(tableView.bounds.height - Layout.autoScrollThreshold, 0)
+        let composerWasFirst = view.window?.firstResponder === composerBar.textView
+        let anchor = currentScrollAnchor()
 
+        isRestoringScroll = true
         tableView.reloadData()
         tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<state.timelineItems.count))
         tableView.layoutSubtreeIfNeeded()
+        updateEmptyState()
+        updateHistoryBanner()
+        restoreScrollAnchor(anchor)
+        isRestoringScroll = false
+        updateJumpToLatestButtonVisibility()
 
-        if wasAtBottom {
-            scrollToBottom()
-            scheduleMarkSelectedRoomAsRead()
-            return
+        if composerWasFirst {
+            focusComposerIfNeeded(force: true)
         }
-
-        let maxOffset = max(0, tableView.bounds.height - clipView.bounds.height)
-        clipView.scroll(to: NSPoint(x: 0, y: min(previousOffset, maxOffset)))
-        scrollView.reflectScrolledClipView(clipView)
     }
 
     private func refreshVisibleMediaRows() {
@@ -891,9 +1100,11 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         let rows = tableView.rows(in: visibleRect)
         guard rows.location != NSNotFound, rows.length > 0 else { return }
 
+        var heightsNeedUpdate = IndexSet()
         for row in rows.location..<(rows.location + rows.length) where tableView.numberOfRows > row {
             let item = state.timelineItems[row]
             guard item.media != nil else { continue }
+            heightsNeedUpdate.insert(row)
             guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineMediaCellView else {
                 continue
             }
@@ -906,6 +1117,9 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
                 self?.openMedia(for: item)
             }
         }
+        if !heightsNeedUpdate.isEmpty {
+            tableView.noteHeightOfRows(withIndexesChanged: heightsNeedUpdate)
+        }
     }
 
     private func scrollToBottom() {
@@ -914,13 +1128,107 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func handleTimelineScroll() {
-        guard isScrolledToBottom() else { return }
+        guard !isRestoringScroll else { return }
+        liveFollow.applyUserScroll(isAtBottom: isScrolledToBottom())
+        updateJumpToLatestButtonVisibility()
+        if liveFollow.isFollowingLiveTraffic {
+            scheduleMarkSelectedRoomAsRead()
+        }
+        requestOlderHistoryIfNeeded()
+    }
+
+    @objc
+    private func jumpToLatestMessages() {
+        liveFollow.jumpToLatest()
+        isRestoringScroll = true
+        scrollToBottom()
+        isRestoringScroll = false
+        updateJumpToLatestButtonVisibility()
         scheduleMarkSelectedRoomAsRead()
+    }
+
+    private func requestOlderHistoryIfNeeded() {
+        guard state.selectedRoomSummary?.membership == .joined else { return }
+        let reachedStart = state.timelineHistoryStatus == .noMoreHistory
+        let isLoading = state.timelineHistoryStatus == .loadingOlder
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let rows = tableView.rows(in: visibleRect)
+        let itemsAboveViewport = rows.location == NSNotFound ? state.timelineItems.count : max(0, rows.location)
+        guard TimelinePaginationPolicy.shouldLoadOlderWhileScrolling(
+            itemsAboveViewport: itemsAboveViewport,
+            reachedStart: reachedStart,
+            isLoading: isLoading
+        ) else { return }
+
+        paginationDebounceTask?.cancel()
+        paginationDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard let self, !Task.isCancelled else { return }
+            self.state.loadOlderTimelineHistory()
+        }
+    }
+
+    private func currentScrollAnchor() -> (isBottom: Bool, itemID: String?, offsetInViewport: CGFloat) {
+        let roomID = state.selectedRoomSummary?.roomID.rawValue
+        if trackedRoomID != roomID {
+            trackedRoomID = roomID
+            liveFollow.resetForSelectedRoomChange()
+        }
+        if liveFollow.shouldPinViewportToLatestOnReload || state.timelineItems.isEmpty {
+            return (true, nil, 0)
+        }
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let rows = tableView.rows(in: visibleRect)
+        guard rows.location != NSNotFound, rows.length > 0,
+              state.timelineItems.indices.contains(rows.location) else {
+            return (false, nil, 0)
+        }
+        let row = rows.location
+        let rowRect = tableView.rect(ofRow: row)
+        return (false, state.timelineItems[row].id, rowRect.minY - visibleRect.minY)
+    }
+
+    private func restoreScrollAnchor(_ anchor: (isBottom: Bool, itemID: String?, offsetInViewport: CGFloat)) {
+        if anchor.isBottom {
+            scrollToBottom()
+            scheduleMarkSelectedRoomAsRead()
+            return
+        }
+        guard let itemID = anchor.itemID,
+              let row = state.timelineItems.firstIndex(where: { $0.id == itemID }) else {
+            return
+        }
+        tableView.layoutSubtreeIfNeeded()
+        let rowRect = tableView.rect(ofRow: row)
+        let clipView = scrollView.contentView
+        var origin = clipView.bounds.origin
+        origin.y = rowRect.minY - anchor.offsetInViewport
+        let maxOffset = max(0, tableView.bounds.height - clipView.bounds.height)
+        origin.y = min(max(origin.y, 0), maxOffset)
+        clipView.scroll(to: origin)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func updateHistoryBanner() {
+        if let text = state.timelineHistoryStatus.bannerText {
+            historyBannerField.stringValue = text
+            historyBannerField.isHidden = false
+        } else {
+            historyBannerField.stringValue = ""
+            historyBannerField.isHidden = true
+        }
     }
 
     private func isScrolledToBottom() -> Bool {
         let visibleRect = scrollView.contentView.documentVisibleRect
         return visibleRect.maxY >= max(tableView.bounds.height - Layout.autoScrollThreshold, 0)
+    }
+
+    private func updateJumpToLatestButtonVisibility() {
+        jumpToLatestButton.isHidden = !liveFollow.shouldShowJumpToLatestControl(
+            hasItems: !state.timelineItems.isEmpty,
+            isAtBottom: isScrolledToBottom()
+        )
     }
 
     private func scheduleMarkSelectedRoomAsRead() {
@@ -935,37 +1243,46 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         }
     }
 
-    public func textDidChange(_ notification: Notification) {
-        guard notification.object as AnyObject? === composerTextView else { return }
-        updateComposerHeight()
-    }
-
-    private func updateComposerAvailability() {
-        let isJoinedRoom = state.selectedRoomSummary?.membership == .joined
-        composerTextView.isEditable = isJoinedRoom
-        composerTextView.isSelectable = isJoinedRoom
-        composerScrollView.alphaValue = isJoinedRoom ? 1.0 : 0.65
-        sendButton.isEnabled = isJoinedRoom
-        composerTextView.toolTip = isJoinedRoom ? nil : "Join this room before sending messages."
-
-        if !isJoinedRoom && !composerTextView.string.isEmpty {
-            composerTextView.string = ""
-            updateComposerHeight()
+    private func updateEmptyState() {
+        if state.selectedRoomSummary == nil {
+            emptyField.stringValue = "Select a room to read and send messages."
+            emptyField.isHidden = false
+        } else if state.timelineItems.isEmpty {
+            emptyField.stringValue = "No messages yet."
+            emptyField.isHidden = false
+        } else {
+            emptyField.isHidden = true
+            emptyField.stringValue = ""
         }
     }
 
-    public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard textView === composerTextView else { return false }
-        guard commandSelector == #selector(NSResponder.insertNewline(_:)) ||
-              commandSelector == #selector(NSResponder.insertLineBreak(_:)) else {
-            return false
+    private func focusComposerIfNeeded(force: Bool) {
+        guard state.selectedRoomSummary?.membership == .joined else { return }
+        guard view.window?.isKeyWindow == true else { return }
+        let alreadyFocused = view.window?.firstResponder === composerBar.textView
+        if alreadyFocused {
+            didFocusComposerForCurrentRoom = true
+            return
         }
+        guard force || !didFocusComposerForCurrentRoom else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if self.composerBar.makeComposerFirstResponder() {
+                self.didFocusComposerForCurrentRoom = true
+            }
+        }
+    }
 
-        let modifiers = NSApp.currentEvent?.modifierFlags.intersection([.shift, .option, .control, .command]) ?? []
-        guard modifiers.isEmpty else { return false }
-
-        sendCurrentDraft()
-        return true
+    private func enqueueAttachments(from urls: [URL]) {
+        guard state.selectedRoomSummary?.membership == .joined else { return }
+        do {
+            let attachments = try ComposerMediaFactory.attachments(from: urls, caption: nil)
+            pendingAttachments.append(contentsOf: attachments)
+            reloadComposer()
+            focusComposerIfNeeded(force: true)
+        } catch {
+            state.presentComposerNotice(error.localizedDescription)
+        }
     }
 
     private func openMedia(for item: TimelineItem) {
@@ -1010,29 +1327,48 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             NSWorkspace.shared.open(url)
         }
     }
+}
 
-    private func updateComposerHeight() {
-        guard let textContainer = composerTextView.textContainer,
-              let layoutManager = composerTextView.layoutManager else {
-            return
-        }
+private final class JumpToLatestButton: NSButton {
+    static let diameter: CGFloat = 32
 
-        let contentWidth = max(composerScrollView.contentSize.width, 0)
-        textContainer.containerSize = NSSize(width: contentWidth, height: CGFloat.greatestFiniteMagnitude)
-        layoutManager.ensureLayout(for: textContainer)
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        bezelStyle = .circular
+        isBordered = true
+        imagePosition = .imageOnly
+        controlSize = .regular
+        refusesFirstResponder = true
+        focusRingType = .exterior
+        wantsLayer = true
+        layer?.cornerRadius = Self.diameter / 2
+        layer?.masksToBounds = true
 
-        let textHeight = layoutManager.usedRect(for: textContainer).height
-        let targetHeight = max(
-            Layout.composerMinHeight,
-            min(
-                Layout.composerMaxHeight,
-                ceil(textHeight + (composerTextView.textContainerInset.height * 2) + 2)
-            )
+        let symbol = NSImage(
+            systemSymbolName: "chevron.down",
+            accessibilityDescription: "Jump to latest messages"
         )
+        image = symbol?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        )
+        contentTintColor = .labelColor
+        toolTip = "Jump to latest messages"
+        setAccessibilityLabel("Jump to latest messages")
+        setAccessibilityRole(.button)
+        setAccessibilityTitle("Jump to latest messages")
 
-        if composerHeightConstraint?.constant != targetHeight {
-            composerHeightConstraint?.constant = targetHeight
-        }
-        composerScrollView.hasVerticalScroller = targetHeight >= Layout.composerMaxHeight
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: Self.diameter),
+            heightAnchor.constraint(equalToConstant: Self.diameter)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: Self.diameter, height: Self.diameter)
     }
 }

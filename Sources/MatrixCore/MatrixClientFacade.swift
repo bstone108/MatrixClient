@@ -8,6 +8,8 @@ public protocol MatrixClientFacade: Sendable {
     func spaceSummaries(for accountID: AccountIdentifier) async -> [SpaceSummary]
     func roomListStream(for accountID: AccountIdentifier, spaceID: SpaceIdentifier?) async -> AsyncStream<[RoomSummary]>
     func timelineStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<[TimelineItem]>
+    func timelineHistoryStatusStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<TimelineHistoryStatus>
+    func paginateOlderHistory(in roomID: RoomIdentifier, accountID: AccountIdentifier) async
     func mediaStateStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<[String: TimelineMediaLoadState]>
     func mediaWorkerStateStream(for accountID: AccountIdentifier) async -> AsyncStream<[MediaDownloadWorkerSnapshot]>
     func notificationEventStream() async -> AsyncStream<RoomNotificationEvent>
@@ -23,7 +25,8 @@ public protocol MatrixClientFacade: Sendable {
     func cancelVerification(for accountID: AccountIdentifier) async
     func markRoomAsRead(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async
     func joinRoom(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async throws
-    func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async
+    func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws
+    func sendMedia(_ attachment: OutgoingMediaAttachment, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws
     func setActiveAccount(_ accountID: AccountIdentifier?) async
     func queueDiagnostics() async -> [SendQueueSnapshot]
     func login(serverNameOrURL: String?, username: String, password: String) async

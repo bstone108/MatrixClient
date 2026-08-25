@@ -315,7 +315,8 @@ enum TimelineItemReconciler {
                 receipts: effectiveReceipts,
                 transactionID: primary.transactionID ?? secondary.transactionID,
                 isDeleted: false,
-                deletedAt: nil
+                deletedAt: nil,
+                isMention: primary.isMention || secondary.isMention
             )
         }
 
@@ -338,7 +339,8 @@ enum TimelineItemReconciler {
             receipts: effectiveReceipts,
             transactionID: existing.transactionID ?? incoming.transactionID,
             isDeleted: true,
-            deletedAt: incoming.deletedAt ?? existing.deletedAt ?? .now
+            deletedAt: incoming.deletedAt ?? existing.deletedAt ?? .now,
+            isMention: existing.isMention || incoming.isMention
         )
     }
 
@@ -422,7 +424,8 @@ enum TimelineItemReconciler {
             receipts: normalizedSummary,
             transactionID: item.transactionID,
             isDeleted: item.isDeleted,
-            deletedAt: item.deletedAt
+            deletedAt: item.deletedAt,
+            isMention: item.isMention
         )
     }
 
