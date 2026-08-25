@@ -42,6 +42,7 @@ final class InspectorViewController: NSViewController {
         joinButton.bezelStyle = .rounded
         joinButton.target = self
         joinButton.action = #selector(joinSelectedRoom)
+        joinButton.setAccessibilityLabel("Join room")
 
         downloadsSectionField.font = .systemFont(ofSize: 11, weight: .semibold)
         downloadsSectionField.textColor = .secondaryLabelColor
@@ -51,6 +52,10 @@ final class InspectorViewController: NSViewController {
         originalSectionField.textColor = .secondaryLabelColor
         recoverySectionField.font = .systemFont(ofSize: 11, weight: .semibold)
         recoverySectionField.textColor = .secondaryLabelColor
+        downloadsSectionField.stringValue = "Media downloads"
+        thumbSectionField.stringValue = "Thumbnails"
+        originalSectionField.stringValue = "Originals"
+        recoverySectionField.stringValue = "Retries"
 
         let workerFont = NSFont.monospacedSystemFont(ofSize: 10.5, weight: .regular)
         for field in thumbWorkerFields + originalWorkerFields + recoveryWorkerFields {
@@ -88,10 +93,10 @@ final class InspectorViewController: NSViewController {
         downloadsCard.wantsLayer = true
         downloadsCard.layer?.cornerRadius = 12
         downloadsCard.translatesAutoresizingMaskIntoConstraints = false
-        downloadsCard.setContentHuggingPriority(.required, for: .horizontal)
-        downloadsCard.setContentHuggingPriority(.required, for: .vertical)
-        downloadsCard.setContentCompressionResistancePriority(.required, for: .horizontal)
-        downloadsCard.setContentCompressionResistancePriority(.required, for: .vertical)
+        downloadsCard.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        downloadsCard.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        downloadsCard.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        downloadsCard.setContentCompressionResistancePriority(.defaultHigh, for: .vertical)
 
         let thumbViews: [NSView] = [downloadsSectionField, thumbSectionField] + thumbWorkerFields
         let originalViews: [NSView] = [separator, originalSectionField] + originalWorkerFields
@@ -120,8 +125,7 @@ final class InspectorViewController: NSViewController {
 
             downloadsCard.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
             downloadsCard.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16),
-            downloadsCard.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 16),
-            downloadsCard.widthAnchor.constraint(equalToConstant: 228),
+            downloadsCard.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
             downloadsCard.heightAnchor.constraint(equalToConstant: 260),
 
             downloadsStack.leadingAnchor.constraint(equalTo: downloadsCard.leadingAnchor, constant: 12),

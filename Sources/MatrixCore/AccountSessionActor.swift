@@ -167,6 +167,7 @@ private enum LiveMatrixSessionError: LocalizedError {
     case passwordLoginUnsupported
     case unsupportedSlidingSync
     case roomUnavailable(String)
+    case mediaSendUnavailable
 
     var errorDescription: String? {
         switch self {
@@ -176,6 +177,8 @@ private enum LiveMatrixSessionError: LocalizedError {
             return "This homeserver does not advertise native Sliding Sync."
         case let .roomUnavailable(roomID):
             return "The room \(roomID) is not currently available in Sliding Sync."
+        case .mediaSendUnavailable:
+            return MatrixSendError.sdkUnavailable.errorDescription
         }
     }
 }
@@ -691,33 +694,25 @@ public actor AccountSessionActor {
     }
 
     public func sendMessage(_ body: String, roomID: RoomIdentifier) async throws {
-        if syncTransport == .classicV2 {
-            try await ensureTimelineSubscription(for: roomID)
-            guard let subscription = timelineSubscriptions[roomID] else { throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue) }
-            _ = try await subscription.timeline.send(msg: messageEventContentFromMarkdown(md: body))
-            return
-        }
         try await ensureTimelineSubscription(for: roomID)
         guard let subscription = timelineSubscriptions[roomID] else {
             throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue)
         }
-        let content = messageEventContentFromMarkdown(md: body)
-        let timeline = subscription.timeline
-        let diagnostics = self.diagnostics
-        let roomIDValue = roomID.rawValue
-        let accountIDValue = summary.accountID.rawValue
-        Task.detached(priority: .userInitiated) {
-            do {
-                _ = try await timeline.send(msg: content)
-                await self.schedulePendingSendMonitor(for: roomID)
-            } catch {
-                await diagnostics.record(.error, category: "Timeline", message: "Failed to enqueue message", metadata: [
-                    "roomID": roomIDValue,
-                    "accountID": accountIDValue,
-                    "error": error.localizedDescription
-                ])
-            }
+        _ = try await subscription.timeline.send(msg: messageEventContentFromMarkdown(md: body))
+        await schedulePendingSendMonitor(for: roomID)
+    }
+
+    public func sendMedia(_ attachment: OutgoingMediaAttachment, roomID: RoomIdentifier) async throws {
+        try await ensureTimelineSubscription(for: roomID)
+        guard let subscription = timelineSubscriptions[roomID] else {
+            throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue)
         }
+        #if canImport(MatrixRustSDK)
+        try await MatrixSDKMediaSender.send(attachment, using: subscription.timeline)
+        await schedulePendingSendMonitor(for: roomID)
+        #else
+        throw LiveMatrixSessionError.mediaSendUnavailable
+        #endif
     }
 
     public func resolveReceiptAvatarFileURL(for receipt: ReadReceipt) async -> URL? {

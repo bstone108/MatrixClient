@@ -5,13 +5,15 @@ import TimelineUI
 final class MainWindowController: NSWindowController {
     private enum WindowMetrics {
         static let defaultSize = NSSize(width: 1_680, height: 980)
-        static let minimumSize = NSSize(width: 1_120, height: 720)
+        static let minimumSize = NSSize(width: 960, height: 640)
         static let collapsedThreshold = NSSize(width: 320, height: 240)
         static let screenMargin: CGFloat = 40
     }
 
     private enum WindowPersistence {
         static let frameKey = "MainWindow.frame"
+        static let inspectorCollapsedKey = "MainWindow.inspectorCollapsed"
+        static let splitAutosaveName = "MatrixClient.MainSplitView"
     }
 
     private let state: WorkspaceStateController
@@ -55,6 +57,7 @@ final class MainWindowController: NSWindowController {
     @objc
     func toggleInspector(_ sender: Any?) {
         inspectorItem?.isCollapsed.toggle()
+        persistInspectorCollapsedState()
     }
 
     func showAndFocusWindow() {
@@ -89,6 +92,19 @@ final class MainWindowController: NSWindowController {
 
     func persistWindowFrame() {
         saveWindowFrame()
+        persistInspectorCollapsedState()
+    }
+
+    private func persistInspectorCollapsedState() {
+        guard let inspectorItem else { return }
+        UserDefaults.standard.set(inspectorItem.isCollapsed, forKey: WindowPersistence.inspectorCollapsedKey)
+    }
+
+    private func persistedInspectorCollapsed() -> Bool {
+        if UserDefaults.standard.object(forKey: WindowPersistence.inspectorCollapsedKey) == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: WindowPersistence.inspectorCollapsedKey)
     }
 
     private func buildWorkspaceUI() {
@@ -98,26 +114,33 @@ final class MainWindowController: NSWindowController {
         let inspector = InspectorViewController(state: state)
 
         let railItem = NSSplitViewItem(sidebarWithViewController: rail)
-        railItem.minimumThickness = 180
-        railItem.maximumThickness = 260
+        railItem.minimumThickness = 168
+        railItem.maximumThickness = 240
+        railItem.canCollapse = true
 
-        let roomListItem = NSSplitViewItem(viewController: roomList)
-        roomListItem.minimumThickness = 260
-        roomListItem.maximumThickness = 360
+        let roomListItem = NSSplitViewItem(contentListWithViewController: roomList)
+        roomListItem.minimumThickness = 220
+        roomListItem.maximumThickness = 340
 
         let timelineItem = NSSplitViewItem(viewController: contentHost)
-        timelineItem.minimumThickness = 640
+        timelineItem.minimumThickness = 420
+        timelineItem.holdingPriority = NSLayoutConstraint.Priority(249)
 
-        let inspectorItem = NSSplitViewItem(viewController: inspector)
-        inspectorItem.minimumThickness = 260
+        let inspectorItem = NSSplitViewItem(inspectorWithViewController: inspector)
+        inspectorItem.minimumThickness = 240
         inspectorItem.maximumThickness = 360
+        inspectorItem.canCollapse = true
+        inspectorItem.holdingPriority = NSLayoutConstraint.Priority(240)
 
+        splitViewController.splitView.isVertical = true
+        splitViewController.splitView.dividerStyle = .thin
+        splitViewController.splitView.autosaveName = WindowPersistence.splitAutosaveName
         splitViewController.addSplitViewItem(railItem)
         splitViewController.addSplitViewItem(roomListItem)
         splitViewController.addSplitViewItem(timelineItem)
         splitViewController.addSplitViewItem(inspectorItem)
         self.inspectorItem = inspectorItem
-        inspectorItem.isCollapsed = false
+        inspectorItem.isCollapsed = persistedInspectorCollapsed()
 
         toolbarController = buildToolbar()
 
@@ -296,12 +319,16 @@ extension MainWindowController: NSToolbarDelegate {
         switch itemIdentifier {
         case .toggleInspector:
             item.label = "Inspector"
-            item.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: nil)
+            item.paletteLabel = "Toggle Inspector"
+            item.toolTip = "Show or hide the inspector"
+            item.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Toggle inspector")
             item.target = self
             item.action = #selector(toggleInspector(_:))
         case .exportBundle:
             item.label = "Export Logs"
-            item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: nil)
+            item.paletteLabel = "Export Support Bundle"
+            item.toolTip = "Export a support bundle"
+            item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export support bundle")
             item.target = self
             item.action = #selector(exportSupportBundle(_:))
         default:
@@ -340,6 +367,7 @@ extension MainWindowController: NSWindowDelegate {
             userAdjustedWindowFrame = true
         }
         saveWindowFrame()
+        persistInspectorCollapsedState()
     }
 
     func windowDidDeminiaturize(_ notification: Notification) {

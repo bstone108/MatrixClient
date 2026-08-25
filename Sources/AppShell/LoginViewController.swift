@@ -51,6 +51,12 @@ final class LoginViewController: NSViewController {
         connectButton.controlSize = .large
         connectButton.target = self
         connectButton.action = #selector(attemptLogin)
+        connectButton.keyEquivalent = "\r"
+        connectButton.setAccessibilityLabel("Connect")
+
+        serverField.nextKeyView = usernameField
+        usernameField.nextKeyView = passwordField
+        passwordField.nextKeyView = connectButton
 
         let serverRow = labeledRow(title: "Server", field: serverField)
         let usernameRow = labeledRow(title: "Username", field: usernameField)
@@ -101,6 +107,11 @@ final class LoginViewController: NSViewController {
             self?.reloadSessionState()
         }
         reloadSessionState()
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        view.window?.makeFirstResponder(usernameField.stringValue.isEmpty ? usernameField : passwordField)
     }
 
     @objc

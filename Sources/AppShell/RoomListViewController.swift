@@ -42,23 +42,22 @@ final class RoomListCellView: NSTableCellView {
         titleField.stringValue = room.displayName
         previewField.stringValue = roomListPreview(for: room)
         badgeField.stringValue = room.unreadCount > 0 ? String(room.unreadCount) : ""
-        titleField.font = .systemFont(ofSize: 13, weight: selected ? .bold : .semibold)
+        titleField.font = .systemFont(ofSize: 13, weight: (selected || room.unreadCount > 0) ? .bold : .semibold)
         titleField.textColor = room.membership == .notJoined ? .systemRed : .labelColor
 
-        if room.membership == .notJoined {
+        if selected {
+            layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.16).cgColor
+            layer?.borderWidth = 0
+            layer?.borderColor = NSColor.clear.cgColor
+            previewField.textColor = .labelColor
+        } else if room.membership == .notJoined {
             previewField.textColor = .systemRed.withAlphaComponent(0.85)
-            if selected {
-                layer?.backgroundColor = NSColor.clear.cgColor
-                layer?.borderWidth = 0
-                layer?.borderColor = NSColor.clear.cgColor
-            } else {
-                layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.10).cgColor
-                layer?.borderWidth = 1
-                layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.22).cgColor
-            }
+            layer?.backgroundColor = NSColor.systemRed.withAlphaComponent(0.10).cgColor
+            layer?.borderWidth = 1
+            layer?.borderColor = NSColor.systemRed.withAlphaComponent(0.22).cgColor
         } else if room.membership == .invited {
             previewField.textColor = .systemOrange
-            layer?.backgroundColor = NSColor.clear.cgColor
+            layer?.backgroundColor = NSColor.systemOrange.withAlphaComponent(0.08).cgColor
             layer?.borderWidth = 0
             layer?.borderColor = NSColor.clear.cgColor
         } else {
@@ -120,6 +119,7 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
 
     private let state: WorkspaceStateController
     private let tableView = NSTableView(frame: .zero)
+    private let emptyField = NSTextField(wrappingLabelWithString: "No rooms in this list yet.")
     private var isApplyingSelection = false
     private var rows: [ListRow] = []
 
@@ -140,19 +140,34 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
         tableView.delegate = self
         tableView.dataSource = self
         tableView.rowHeight = 58
+        tableView.selectionHighlightStyle = .none
+        tableView.intercellSpacing = NSSize(width: 0, height: 2)
+        tableView.backgroundColor = .clear
 
         let scrollView = NSScrollView(frame: .zero)
         scrollView.documentView = tableView
         scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(scrollView)
+
+        emptyField.font = .systemFont(ofSize: 12)
+        emptyField.textColor = .secondaryLabelColor
+        emptyField.alignment = .center
+        emptyField.maximumNumberOfLines = 0
+        emptyField.translatesAutoresizingMaskIntoConstraints = false
+        emptyField.isHidden = true
+        root.addSubview(emptyField)
 
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: root.topAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor)
+            scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            emptyField.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16),
+            emptyField.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
+            emptyField.centerYAnchor.constraint(equalTo: root.centerYAnchor)
         ])
         view = root
     }
@@ -213,9 +228,18 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
         state.selectRoom(selectedRoomID)
     }
 
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        if case .section = rows[row] { return false }
+        return true
+    }
+
     private func reloadData() {
         rebuildRows()
         tableView.reloadData()
+        emptyField.isHidden = !rows.isEmpty
+        emptyField.stringValue = state.displayedSpaceID == nil
+            ? "No rooms yet. When this account syncs, they will appear here."
+            : "No rooms in this space yet."
         guard let selectedRoomID = state.selectedRoomID,
               let row = rows.firstIndex(where: {
                   if case let .room(room) = $0 { return room.roomID == selectedRoomID }
@@ -236,21 +260,26 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     private func rebuildRows() {
-        guard state.displayedSpaceID != nil else {
-            rows = state.rooms.map(ListRow.room)
-            return
+        let invites = state.rooms.filter { $0.membership == .invited }
+        let unread = state.rooms.filter { $0.membership == .joined && $0.unreadCount > 0 }
+        let joined = state.rooms.filter { $0.membership == .joined && $0.unreadCount == 0 }
+        let other = state.rooms.filter { $0.membership != .joined && $0.membership != .invited }
+
+        var grouped: [ListRow] = []
+        func appendSection(_ title: String, rooms: [RoomSummary]) {
+            guard !rooms.isEmpty else { return }
+            grouped.append(.section(title))
+            grouped.append(contentsOf: rooms.map(ListRow.room))
         }
 
-        let joined = state.rooms.filter(\.isJoined)
-        let unjoined = state.rooms.filter { !$0.isJoined }
-        var grouped: [ListRow] = []
-        if !joined.isEmpty {
-            grouped.append(.section("Joined rooms"))
-            grouped.append(contentsOf: joined.map(ListRow.room))
-        }
-        if !unjoined.isEmpty {
-            grouped.append(.section("Not joined rooms"))
-            grouped.append(contentsOf: unjoined.map(ListRow.room))
+        appendSection("Invites", rooms: invites)
+        appendSection("Unread", rooms: unread)
+        if state.displayedSpaceID != nil {
+            appendSection("Joined rooms", rooms: joined)
+            appendSection("Not joined", rooms: other)
+        } else {
+            appendSection("Rooms", rooms: joined)
+            appendSection("Other", rooms: other)
         }
         rows = grouped
     }

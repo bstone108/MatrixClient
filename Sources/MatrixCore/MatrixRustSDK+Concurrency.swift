@@ -18,4 +18,5 @@ extension SessionVerificationController: @retroactive @unchecked Sendable {}
 extension SessionVerificationData: @retroactive @unchecked Sendable {}
 extension SessionVerificationEmoji: @retroactive @unchecked Sendable {}
 extension VerificationState: @retroactive @unchecked Sendable {}
+extension SendAttachmentJoinHandle: @retroactive @unchecked Sendable {}
 #endif

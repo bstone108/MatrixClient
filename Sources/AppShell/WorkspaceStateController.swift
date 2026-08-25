@@ -25,6 +25,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private var mediaObservers: [UUID: @MainActor () -> Void] = [:]
     private var inspectorObservers: [UUID: @MainActor () -> Void] = [:]
     private var selectionObservers: [UUID: @MainActor () -> Void] = [:]
+    private var composerNoticeObservers: [UUID: @MainActor () -> Void] = [:]
 
     private var sessionTask: Task<Void, Never>?
     private var roomListTask: Task<Void, Never>?
@@ -55,6 +56,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     public private(set) var accountOperationStatusMessage: String?
     public private(set) var isPerformingAccountOperation = false
     public private(set) var notificationPreferences: NotificationPreferences
+    public private(set) var composerNotice: String?
 
     public var selectedAccountSummary: AccountSummary? {
         guard let selectedAccountID else { return nil }
@@ -130,6 +132,10 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         selectionObservers[UUID()] = observer
     }
 
+    public func addComposerNoticeObserver(_ observer: @escaping @MainActor () -> Void) {
+        composerNoticeObservers[UUID()] = observer
+    }
+
     public func selectAccount(_ accountID: AccountIdentifier) {
         guard selectedAccountID != accountID || selectedSpaceID != nil || selectedSettingsDestination != nil else { return }
         Task { [weak self] in
@@ -174,10 +180,55 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     }
 
     public func sendMessage(_ body: String) {
-        guard let selectedRoomID, let selectedAccountID else { return }
-        Task {
-            await matrixClient.sendMessage(body, in: selectedRoomID, accountID: selectedAccountID)
+        guard selectedRoomSummary?.membership == .joined else {
+            presentComposerNotice(MatrixSendError.roomNotJoined.localizedDescription)
+            return
         }
+        guard let selectedRoomID, let selectedAccountID else {
+            presentComposerNotice(MatrixSendError.missingSelection.localizedDescription)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.matrixClient.sendMessage(body, in: selectedRoomID, accountID: selectedAccountID)
+                self.clearComposerNotice()
+            } catch {
+                self.presentComposerNotice(error.localizedDescription)
+            }
+        }
+    }
+
+    public func sendMedia(_ attachment: OutgoingMediaAttachment) {
+        guard selectedRoomSummary?.membership == .joined else {
+            presentComposerNotice(MatrixSendError.roomNotJoined.localizedDescription)
+            return
+        }
+        guard let selectedRoomID, let selectedAccountID else {
+            presentComposerNotice(MatrixSendError.missingSelection.localizedDescription)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.matrixClient.sendMedia(attachment, in: selectedRoomID, accountID: selectedAccountID)
+                self.clearComposerNotice()
+            } catch {
+                self.presentComposerNotice(error.localizedDescription)
+            }
+        }
+    }
+
+    public func presentComposerNotice(_ message: String?) {
+        let trimmed = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        composerNotice = (trimmed?.isEmpty == false) ? trimmed : nil
+        notify(composerNoticeObservers)
+    }
+
+    public func clearComposerNotice() {
+        guard composerNotice != nil else { return }
+        composerNotice = nil
+        notify(composerNoticeObservers)
     }
 
     public func markSelectedRoomAsRead() {
@@ -195,10 +246,12 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
             do {
                 try await self.matrixClient.joinRoom(selectedRoomID, accountID: selectedAccountID)
                 self.selectedSettingsDestination = nil
+                self.clearComposerNotice()
                 await self.loadRoomDetails()
                 await self.subscribeToRoomList()
             } catch {
                 self.accountOperationStatusMessage = error.localizedDescription
+                self.presentComposerNotice(error.localizedDescription)
                 self.notify(self.sessionObservers)
             }
         }
@@ -505,6 +558,8 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
                     let previousSelectedRoomID = self.selectedRoomID
                     let previousSpaces = self.spaces
                     let previousSelectedSpaceID = self.selectedSpaceID
+                    let previousHadSelectedSummary = self.selectedRoomSummary != nil
+                    let previousMembership = self.selectedRoomSummary?.membership
                     self.rooms = effectiveRoomSnapshot
                     self.spaces = updatedSpaces
                     // Space summaries can briefly be absent while the sync
@@ -531,11 +586,17 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
                         self.notify(self.sidebarObservers)
                     }
                     self.notify(self.roomListObservers)
-                    if self.selectedRoomID != previousSelectedRoomID || self.selectedSpaceID != previousSelectedSpaceID {
+                    let selectedRoomChanged = self.selectedRoomID != previousSelectedRoomID ||
+                        self.selectedSpaceID != previousSelectedSpaceID
+                    // The first room snapshot often keeps the restored room ID.
+                    // Composer availability still depends on membership, which
+                    // is unknown until this snapshot arrives.
+                    let selectedSummaryBecameAvailable = self.selectedRoomSummary != nil && !previousHadSelectedSummary
+                    let selectedMembershipChanged = self.selectedRoomSummary?.membership != previousMembership
+                    if selectedRoomChanged || selectedSummaryBecameAvailable || selectedMembershipChanged {
                         self.notify(self.selectionObservers)
                     }
-                    return self.selectedRoomID != previousSelectedRoomID ||
-                        self.selectedSpaceID != previousSelectedSpaceID ||
+                    return selectedRoomChanged ||
                         self.timelineTask == nil
                 }
                 await self.loadRoomDetails()
@@ -659,12 +720,14 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         selectedSettingsDestination = nil
         selectedRoomDetails = nil
         knownRoomDisplayNames = [:]
+        composerNotice = nil
         notify(sidebarObservers)
         notify(roomListObservers)
         notify(timelineObservers)
         notify(mediaObservers)
         notify(inspectorObservers)
         notify(selectionObservers)
+        notify(composerNoticeObservers)
     }
 
     private func resetAccountScopedState() {
@@ -685,6 +748,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         selectedSettingsDestination = nil
         selectedRoomDetails = nil
         knownRoomDisplayNames = [:]
+        composerNotice = nil
 
         notify(sidebarObservers)
         notify(roomListObservers)
@@ -692,6 +756,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         notify(mediaObservers)
         notify(inspectorObservers)
         notify(selectionObservers)
+        notify(composerNoticeObservers)
     }
 
     private func persistedSelectedAccountID() -> AccountIdentifier? {

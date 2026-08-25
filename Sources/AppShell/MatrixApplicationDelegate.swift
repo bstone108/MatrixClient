@@ -1,4 +1,5 @@
 import AppKit
+import TimelineUI
 
 @MainActor
 public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
@@ -90,6 +91,9 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
         let exportItem = NSMenuItem(title: "Export Support Bundle", action: #selector(exportSupportBundle(_:)), keyEquivalent: "e")
         exportItem.target = self
         fileMenu.addItem(exportItem)
+        let attachItem = NSMenuItem(title: "Attach File…", action: #selector(TimelineViewController.attachFile(_:)), keyEquivalent: "u")
+        attachItem.keyEquivalentModifierMask = [.command, .shift]
+        fileMenu.addItem(attachItem)
 
         let viewMenuItem = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
         mainMenu.addItem(viewMenuItem)

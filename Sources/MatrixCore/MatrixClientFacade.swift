@@ -23,7 +23,8 @@ public protocol MatrixClientFacade: Sendable {
     func cancelVerification(for accountID: AccountIdentifier) async
     func markRoomAsRead(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async
     func joinRoom(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async throws
-    func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async
+    func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws
+    func sendMedia(_ attachment: OutgoingMediaAttachment, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws
     func setActiveAccount(_ accountID: AccountIdentifier?) async
     func queueDiagnostics() async -> [SendQueueSnapshot]
     func login(serverNameOrURL: String?, username: String, password: String) async

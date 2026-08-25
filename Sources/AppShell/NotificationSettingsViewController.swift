@@ -52,6 +52,9 @@ final class NotificationSettingsViewController: NSViewController {
             contentStack.topAnchor.constraint(equalTo: root.topAnchor, constant: 24)
         ])
 
+        desktopNotificationsButton.setAccessibilityLabel("Desktop notifications")
+        soundButton.setAccessibilityLabel("Play notification sound")
+
         view = root
     }
 

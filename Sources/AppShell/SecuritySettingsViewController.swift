@@ -41,12 +41,16 @@ final class SecuritySettingsViewController: NSViewController {
 
         requestVerificationButton.target = self
         requestVerificationButton.action = #selector(requestVerification(_:))
+        requestVerificationButton.setAccessibilityLabel("Request verification")
         startSasButton.target = self
         startSasButton.action = #selector(startSas(_:))
+        startSasButton.setAccessibilityLabel("Start SAS verification")
         approveVerificationButton.target = self
         approveVerificationButton.action = #selector(approveVerification(_:))
+        approveVerificationButton.setAccessibilityLabel("Confirm match")
         cancelOrRejectButton.target = self
         cancelOrRejectButton.action = #selector(cancelOrRejectVerification(_:))
+        cancelOrRejectButton.setAccessibilityLabel("Cancel verification")
 
         let actionStack = NSStackView(views: [
             requestVerificationButton,

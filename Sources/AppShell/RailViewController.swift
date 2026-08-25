@@ -62,13 +62,16 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
         outlineView.headerView = nil
-        outlineView.rowHeight = 26
+        outlineView.rowHeight = 28
         outlineView.delegate = self
         outlineView.dataSource = self
+        outlineView.indentationPerLevel = 12
+        outlineView.backgroundColor = .clear
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
-        scrollView.borderType = .bezelBorder
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
 
         scrollView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(scrollView)
@@ -161,7 +164,7 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
             case .accounts:
                 cell.textField?.stringValue = "Accounts"
             case .spaces:
-                cell.textField?.stringValue = "Spaces"
+                cell.textField?.stringValue = state.spaces.isEmpty ? "Spaces  ·  None yet" : "Spaces"
             case .settings:
                 cell.textField?.stringValue = "Settings"
             }
@@ -177,7 +180,11 @@ final class RailViewController: NSViewController, NSOutlineViewDataSource, NSOut
                 state.selectedSpaceID == space.summary.spaceID
             cell.textField?.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .regular)
             cell.textField?.textColor = .labelColor
-            cell.textField?.stringValue = space.summary.displayName
+            if space.summary.unreadCount > 0 {
+                cell.textField?.stringValue = "\(space.summary.displayName)  (\(space.summary.unreadCount))"
+            } else {
+                cell.textField?.stringValue = space.summary.displayName
+            }
         case let settings as SidebarSettingsNode:
             let selected = state.selectedSettingsDestination == settings.destination
             cell.textField?.font = .systemFont(ofSize: 13, weight: selected ? .semibold : .regular)

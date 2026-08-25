@@ -290,16 +290,37 @@ public actor MatrixClientService: MatrixClientFacade {
         try await session.joinRoom(roomID)
     }
 
-    public func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async {
-        guard let session = sessions[accountID] else { return }
+    public func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {
+        guard let session = sessions[accountID] else {
+            throw MatrixSendError.missingSelection
+        }
         do {
             try await session.sendMessage(body, roomID: roomID)
         } catch {
-            await diagnostics.record(.error, category: "Timeline", message: "Failed to enqueue message", metadata: [
+            await diagnostics.record(.error, category: "Timeline", message: "Failed to send message", metadata: [
                 "roomID": roomID.rawValue,
                 "accountID": accountID.rawValue,
                 "error": error.localizedDescription
             ])
+            throw error
+        }
+    }
+
+    public func sendMedia(_ attachment: OutgoingMediaAttachment, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {
+        guard let session = sessions[accountID] else {
+            throw MatrixSendError.missingSelection
+        }
+        do {
+            try await session.sendMedia(attachment, roomID: roomID)
+        } catch {
+            await diagnostics.record(.error, category: "Timeline", message: "Failed to send file", metadata: [
+                "roomID": roomID.rawValue,
+                "accountID": accountID.rawValue,
+                "filename": attachment.filename,
+                "mimeType": attachment.mimeType,
+                "error": error.localizedDescription
+            ])
+            throw error
         }
     }
 
