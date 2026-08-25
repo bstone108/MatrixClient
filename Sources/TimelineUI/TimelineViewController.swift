@@ -671,7 +671,7 @@ enum TimelineCellFormatting {
     }
 }
 
-public final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, ComposerBarHosting {
+public final class TimelineViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, ComposerBarHosting, NSMenuItemValidation {
     private enum Layout {
         static let messageBaseHeight: CGFloat = 72
         static let statusBaseHeight: CGFloat = 52
@@ -913,7 +913,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         composerDidRequestAttach()
     }
 
-    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(attachFile(_:)) {
             return state.selectedRoomSummary?.membership == .joined
         }
