@@ -785,9 +785,9 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             forName: NSWindow.didBecomeKeyNotification,
             object: nil,
             queue: .main
-        ) { [weak self] notification in
+        ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, notification.object as AnyObject? === self.view.window else { return }
+                guard let self, self.view.window?.isKeyWindow == true else { return }
                 self.focusComposerIfNeeded(force: false)
             }
         }
