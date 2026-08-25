@@ -681,7 +681,10 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         static let compactMediaBaseHeight: CGFloat = 118
         static let mediaExtraLineHeight: CGFloat = 14
         static let messageExtraLineHeight: CGFloat = 14
+        /// Distance from the bottom of the document that counts as "at the bottom"
+        /// for follow-lock and the jump-to-latest control.
         static let autoScrollThreshold: CGFloat = 36
+        static let jumpToLatestInset: CGFloat = 12
     }
 
     private let state: any TimelineWorkspaceState
@@ -692,6 +695,8 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private let emptyField = NSTextField(wrappingLabelWithString: "")
     private let tableView = NSTableView(frame: .zero)
     private let scrollView = FileDropScrollView(frame: .zero)
+    private let timelinePane = NSView(frame: .zero)
+    private let jumpToLatestButton = JumpToLatestButton()
     private let composerBar = ComposerBarView()
     private var scrollObserver: NSObjectProtocol?
     private var windowObserver: NSObjectProtocol?
@@ -700,6 +705,8 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private var didFocusComposerForCurrentRoom = false
     private var isRestoringScroll = false
     private var paginationDebounceTask: Task<Void, Never>?
+    private var liveFollow = TimelineLiveFollowPolicy()
+    private var trackedRoomID: String?
 
     private var previewControllers: [MediaPreviewWindowController] = []
 
@@ -757,10 +764,25 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         scrollView.onDrop = { [weak self] urls in
             self?.enqueueAttachments(from: urls)
         }
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.setContentHuggingPriority(.init(1), for: .vertical)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+
+        jumpToLatestButton.target = self
+        jumpToLatestButton.action = #selector(jumpToLatestMessages)
+        jumpToLatestButton.isHidden = true
+
+        timelinePane.translatesAutoresizingMaskIntoConstraints = false
+        timelinePane.wantsLayer = true
+        timelinePane.setContentHuggingPriority(.init(1), for: .vertical)
+        timelinePane.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        timelinePane.addSubview(scrollView)
+        timelinePane.addSubview(jumpToLatestButton)
+        jumpToLatestButton.layer?.zPosition = 10
 
         composerBar.host = self
 
-        let stack = NSStackView(views: [headerStack, historyBannerField, scrollView, emptyField, composerBar])
+        let stack = NSStackView(views: [headerStack, historyBannerField, timelinePane, emptyField, composerBar])
         stack.orientation = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -772,7 +794,14 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 14),
             stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
             headerStack.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            composerBar.widthAnchor.constraint(equalTo: stack.widthAnchor)
+            composerBar.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            timelinePane.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: timelinePane.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: timelinePane.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: timelinePane.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: timelinePane.bottomAnchor),
+            jumpToLatestButton.trailingAnchor.constraint(equalTo: timelinePane.trailingAnchor, constant: -Layout.jumpToLatestInset),
+            jumpToLatestButton.bottomAnchor.constraint(equalTo: timelinePane.bottomAnchor, constant: -Layout.jumpToLatestInset)
         ])
 
         view = root
@@ -1012,6 +1041,8 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             if previousRoomID != summary.roomID.rawValue {
                 didFocusComposerForCurrentRoom = false
                 pendingAttachments = []
+                liveFollow.resetForSelectedRoomChange()
+                trackedRoomID = summary.roomID.rawValue
             }
         } else {
             titleField.stringValue = "No Room Selected"
@@ -1019,6 +1050,10 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             titleField.toolTip = nil
             didFocusComposerForCurrentRoom = false
             pendingAttachments = []
+            if trackedRoomID != nil {
+                liveFollow.resetForSelectedRoomChange()
+                trackedRoomID = nil
+            }
         }
         subtitleField.isHidden = subtitleField.stringValue.isEmpty
         if let root = view as? FileDropView {
@@ -1028,6 +1063,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         reloadComposer()
         updateEmptyState()
         updateHistoryBanner()
+        updateJumpToLatestButtonVisibility()
         focusComposerIfNeeded(force: !didFocusComposerForCurrentRoom)
     }
 
@@ -1051,6 +1087,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         updateHistoryBanner()
         restoreScrollAnchor(anchor)
         isRestoringScroll = false
+        updateJumpToLatestButtonVisibility()
 
         if composerWasFirst {
             focusComposerIfNeeded(force: true)
@@ -1092,10 +1129,22 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     private func handleTimelineScroll() {
         guard !isRestoringScroll else { return }
-        if isScrolledToBottom() {
+        liveFollow.applyUserScroll(isAtBottom: isScrolledToBottom())
+        updateJumpToLatestButtonVisibility()
+        if liveFollow.isFollowingLiveTraffic {
             scheduleMarkSelectedRoomAsRead()
         }
         requestOlderHistoryIfNeeded()
+    }
+
+    @objc
+    private func jumpToLatestMessages() {
+        liveFollow.jumpToLatest()
+        isRestoringScroll = true
+        scrollToBottom()
+        isRestoringScroll = false
+        updateJumpToLatestButtonVisibility()
+        scheduleMarkSelectedRoomAsRead()
     }
 
     private func requestOlderHistoryIfNeeded() {
@@ -1120,14 +1169,19 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func currentScrollAnchor() -> (isBottom: Bool, itemID: String?, offsetInViewport: CGFloat) {
-        if state.timelineItems.isEmpty || isScrolledToBottom() {
+        let roomID = state.selectedRoomSummary?.roomID.rawValue
+        if trackedRoomID != roomID {
+            trackedRoomID = roomID
+            liveFollow.resetForSelectedRoomChange()
+        }
+        if liveFollow.shouldPinViewportToLatestOnReload || state.timelineItems.isEmpty {
             return (true, nil, 0)
         }
         let visibleRect = scrollView.contentView.documentVisibleRect
         let rows = tableView.rows(in: visibleRect)
         guard rows.location != NSNotFound, rows.length > 0,
               state.timelineItems.indices.contains(rows.location) else {
-            return (true, nil, 0)
+            return (false, nil, 0)
         }
         let row = rows.location
         let rowRect = tableView.rect(ofRow: row)
@@ -1168,6 +1222,13 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private func isScrolledToBottom() -> Bool {
         let visibleRect = scrollView.contentView.documentVisibleRect
         return visibleRect.maxY >= max(tableView.bounds.height - Layout.autoScrollThreshold, 0)
+    }
+
+    private func updateJumpToLatestButtonVisibility() {
+        jumpToLatestButton.isHidden = !liveFollow.shouldShowJumpToLatestControl(
+            hasItems: !state.timelineItems.isEmpty,
+            isAtBottom: isScrolledToBottom()
+        )
     }
 
     private func scheduleMarkSelectedRoomAsRead() {
@@ -1265,5 +1326,49 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         case .audio, .file:
             NSWorkspace.shared.open(url)
         }
+    }
+}
+
+private final class JumpToLatestButton: NSButton {
+    static let diameter: CGFloat = 32
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        bezelStyle = .circular
+        isBordered = true
+        imagePosition = .imageOnly
+        controlSize = .regular
+        refusesFirstResponder = true
+        focusRingType = .exterior
+        wantsLayer = true
+        layer?.cornerRadius = Self.diameter / 2
+        layer?.masksToBounds = true
+
+        let symbol = NSImage(
+            systemSymbolName: "chevron.down",
+            accessibilityDescription: "Jump to latest messages"
+        )
+        image = symbol?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+        )
+        contentTintColor = .labelColor
+        toolTip = "Jump to latest messages"
+        setAccessibilityLabel("Jump to latest messages")
+        setAccessibilityRole(.button)
+        setAccessibilityTitle("Jump to latest messages")
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: Self.diameter),
+            heightAnchor.constraint(equalToConstant: Self.diameter)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: Self.diameter, height: Self.diameter)
     }
 }

@@ -81,6 +81,8 @@
 		C33333333333333333333317 /* GitHubReleaseFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333307 /* GitHubReleaseFeedTests.swift */; };
 		C33333333333333333333318 /* TimelinePaginationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333308 /* TimelinePaginationPolicyTests.swift */; };
 		C33333333333333333333319 /* RoomNotificationModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333309 /* RoomNotificationModeTests.swift */; };
+		C3333333333333333333331A /* TimelineLiveFollowPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3333333333333333333330A /* TimelineLiveFollowPolicy.swift */; };
+		C3333333333333333333331B /* TimelineLiveFollowPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3333333333333333333330B /* TimelineLiveFollowPolicyTests.swift */; };
 		C7A29B6B7AD6E0652EB66216 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
 		C8DED00A1B883675B8C88630 /* Persistence.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; };
 		CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903044045DB8284FCED08DC5 /* LoginViewController.swift */; };
@@ -322,6 +324,8 @@
 		C33333333333333333333307 /* GitHubReleaseFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubReleaseFeedTests.swift; sourceTree = "<group>"; };
 		C33333333333333333333308 /* TimelinePaginationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelinePaginationPolicyTests.swift; sourceTree = "<group>"; };
 		C33333333333333333333309 /* RoomNotificationModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomNotificationModeTests.swift; sourceTree = "<group>"; };
+		C3333333333333333333330A /* TimelineLiveFollowPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineLiveFollowPolicy.swift; sourceTree = "<group>"; };
+		C3333333333333333333330B /* TimelineLiveFollowPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineLiveFollowPolicyTests.swift; sourceTree = "<group>"; };
 		AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlidingSyncCoordinator.swift; sourceTree = "<group>"; };
 		AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLoginSmokeTests.swift; sourceTree = "<group>"; };
 		B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineItemReconcilerTests.swift; sourceTree = "<group>"; };
@@ -443,6 +447,7 @@
 				C33333333333333333333309 /* RoomNotificationModeTests.swift */,
 				CB75C3F75478352F892E6FD8 /* SlidingSyncCoordinatorTests.swift */,
 				B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */,
+				C3333333333333333333330B /* TimelineLiveFollowPolicyTests.swift */,
 				C33333333333333333333308 /* TimelinePaginationPolicyTests.swift */,
 			);
 			path = MatrixCoreTests;
@@ -514,6 +519,7 @@
 				AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */,
 				512A08C9A4BD4BE79E040307 /* StoredSessionStore.swift */,
 				A3DA26EFE66740A1D2D898D8 /* TimelineItemReconciler.swift */,
+				C3333333333333333333330A /* TimelineLiveFollowPolicy.swift */,
 				C33333333333333333333303 /* TimelinePaginationPolicy.swift */,
 				17992F0F606FCF0035B7D669 /* TimelineStore.swift */,
 			);
@@ -978,6 +984,7 @@
 				BDDFE5441D29A56D9A6F85F3 /* SlidingSyncCoordinator.swift in Sources */,
 				09A610D3D493CC2697A4786C /* StoredSessionStore.swift in Sources */,
 				D705FFE0368A754D1975C9FD /* TimelineItemReconciler.swift in Sources */,
+				C3333333333333333333331A /* TimelineLiveFollowPolicy.swift in Sources */,
 				C33333333333333333333313 /* TimelinePaginationPolicy.swift in Sources */,
 				938A66D66241097ED9EE523E /* TimelineStore.swift in Sources */,
 			);
@@ -997,6 +1004,7 @@
 				C33333333333333333333319 /* RoomNotificationModeTests.swift in Sources */,
 				EEC85F734E5986E1FF3098C7 /* SlidingSyncCoordinatorTests.swift in Sources */,
 				E357D0CDBDD047E680482BA3 /* TimelineItemReconcilerTests.swift in Sources */,
+				C3333333333333333333331B /* TimelineLiveFollowPolicyTests.swift in Sources */,
 				C33333333333333333333318 /* TimelinePaginationPolicyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
