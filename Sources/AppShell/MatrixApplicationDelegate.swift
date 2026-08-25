@@ -54,6 +54,10 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    public func applicationDidBecomeActive(_ notification: Notification) {
+        notificationController?.applicationDidBecomeActive()
+    }
+
     public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }

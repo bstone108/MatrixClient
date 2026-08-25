@@ -7,23 +7,31 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     private actor StateSnapshot {
         private var selectedAccountID: AccountIdentifier?
         private var selectedRoomID: RoomIdentifier?
+        private var isViewingTimeline = true
         private var accountCount = 0
 
         func update(
             selectedAccountID: AccountIdentifier?,
             selectedRoomID: RoomIdentifier?,
+            isViewingTimeline: Bool,
             accountCount: Int
         ) {
             self.selectedAccountID = selectedAccountID
             self.selectedRoomID = selectedRoomID
+            self.isViewingTimeline = isViewingTimeline
             self.accountCount = accountCount
         }
 
         func frontmostState(for event: RoomNotificationEvent, appIsActive: Bool) -> (isSelectedRoom: Bool, hasMultipleAccounts: Bool) {
             (
-                appIsActive &&
-                    selectedAccountID == event.accountID &&
-                    selectedRoomID == event.roomID,
+                TimelineNotificationPolicy.shouldSuppressFrontmostRoom(
+                    appIsActive: appIsActive,
+                    isViewingTimeline: isViewingTimeline,
+                    selectedAccountID: selectedAccountID,
+                    selectedRoomID: selectedRoomID,
+                    eventAccountID: event.accountID,
+                    eventRoomID: event.roomID
+                ),
                 accountCount > 1
             )
         }
@@ -36,6 +44,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     private let defaults: UserDefaults
     private let stateSnapshot = StateSnapshot()
     private var streamTask: Task<Void, Never>?
+    private var didLogDeniedAuthorization = false
 
     init(
         matrixClient: any MatrixClientFacade,
@@ -50,6 +59,8 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         self.center = center
         self.defaults = defaults
         super.init()
+        NotificationPreferences.registerDefaults(in: defaults)
+        center.delegate = self
     }
 
     @MainActor
@@ -70,7 +81,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         }
 
         streamTask?.cancel()
-        streamTask = Task { @MainActor [weak self] in
+        streamTask = Task { [weak self] in
             guard let self else { return }
             let stream = await matrixClient.notificationEventStream()
             for await event in stream {
@@ -80,36 +91,54 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
     }
 
     @MainActor
+    func applicationDidBecomeActive() {
+        syncStateSnapshot()
+        Task { await refreshAuthorizationIfNeeded() }
+    }
+
+    @MainActor
     private func syncStateSnapshot() {
         let selectedAccountID = state.selectedAccountID
         let selectedRoomID = state.selectedRoomID
+        let isViewingTimeline = state.selectedSettingsDestination == nil
         let accountCount = state.accounts.count
         Task { [stateSnapshot] in
             await stateSnapshot.update(
                 selectedAccountID: selectedAccountID,
                 selectedRoomID: selectedRoomID,
+                isViewingTimeline: isViewingTimeline,
                 accountCount: accountCount
             )
         }
     }
 
-    private func refreshAuthorizationIfNeeded() async {
+    func refreshAuthorizationIfNeeded() async {
         guard NotificationPreferences(defaults: defaults).desktopNotificationsEnabled else { return }
         let settings = await currentNotificationSettings()
-        guard settings.authorizationStatus == .notDetermined else { return }
-
-        do {
-            _ = try await requestAuthorization()
-        } catch {
-            await diagnostics.record(.error, category: "Notifications", message: "Failed to request notification authorization", metadata: [
-                "error": error.localizedDescription
-            ])
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            do {
+                let granted = try await requestAuthorization()
+                if !granted {
+                    await diagnostics.record(.notice, category: "Notifications", message: "Notification authorization was not granted")
+                }
+            } catch {
+                await diagnostics.record(.error, category: "Notifications", message: "Failed to request notification authorization", metadata: [
+                    "error": error.localizedDescription
+                ])
+            }
+        case .denied:
+            await logDeniedAuthorizationIfNeeded()
+        default:
+            break
         }
     }
 
     private func deliver(_ event: RoomNotificationEvent) async {
         let preferences = NotificationPreferences(defaults: defaults)
         guard preferences.desktopNotificationsEnabled else { return }
+        guard await ensureAuthorizedToDeliver() else { return }
+
         let appIsActive = await MainActor.run { NSApp.isActive }
         let frontmostState = await stateSnapshot.frontmostState(for: event, appIsActive: appIsActive)
         guard !frontmostState.isSelectedRoom else { return }
@@ -132,6 +161,7 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         if preferences.soundEnabled {
             content.sound = .default
         }
+        content.interruptionLevel = .active
         content.userInfo = [
             "accountID": event.accountID.rawValue,
             "roomID": event.roomID.rawValue
@@ -149,6 +179,29 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
                 "error": error.localizedDescription
             ])
         }
+    }
+
+    private func ensureAuthorizedToDeliver() async -> Bool {
+        var settings = await currentNotificationSettings()
+        if settings.authorizationStatus == .notDetermined {
+            await refreshAuthorizationIfNeeded()
+            settings = await currentNotificationSettings()
+        }
+        switch settings.authorizationStatus {
+        case .denied:
+            await logDeniedAuthorizationIfNeeded()
+            return false
+        case .notDetermined:
+            return false
+        default:
+            return true
+        }
+    }
+
+    private func logDeniedAuthorizationIfNeeded() async {
+        guard !didLogDeniedAuthorization else { return }
+        didLogDeniedAuthorization = true
+        await diagnostics.record(.notice, category: "Notifications", message: "macOS notification permission is denied. Enable banners for Matrix Client in System Settings → Notifications.")
     }
 
     private func currentNotificationSettings() async -> UNNotificationSettings {

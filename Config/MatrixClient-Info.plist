@@ -22,6 +22,10 @@
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSUserNotificationAlertStyle</key>
+  <string>banner</string>
+  <key>NSUserNotificationsUsageDescription</key>
+  <string>Matrix Client shows banners for new messages in rooms you are not currently viewing.</string>
   <key>NSMainNibFile</key>
   <string></string>
   <key>NSPrincipalClass</key>

@@ -2763,19 +2763,14 @@ public actor AccountSessionActor {
         }
 
         let lastSeenEventID = lastSeenNotificationEventIDByRoom[roomID]
+        let newerItems = TimelineNotificationPolicy.incomingMessagesToNotify(
+            previousItems: previousItems,
+            currentItems: currentItems,
+            lastSeenEventID: lastSeenEventID
+        )
         lastSeenNotificationEventIDByRoom[roomID] = latestIncomingEventID
 
-        let newerItems: ArraySlice<TimelineItem>
-        if let lastSeenEventID {
-            guard let lastSeenIndex = currentItems.lastIndex(where: { $0.id == lastSeenEventID }) else {
-                return nil
-            }
-            newerItems = currentItems.suffix(from: lastSeenIndex + 1)
-        } else {
-            newerItems = currentItems[...]
-        }
-
-        guard let candidate = newerItems.reversed().first(where: isNotifiableIncomingMessage) else {
+        guard let candidate = newerItems.last else {
             return nil
         }
 
@@ -2816,14 +2811,7 @@ public actor AccountSessionActor {
     }
 
     private func latestIncomingRemoteMessage(in items: [TimelineItem]) -> TimelineItem? {
-        items.last(where: isNotifiableIncomingMessage)
-    }
-
-    private func isNotifiableIncomingMessage(_ item: TimelineItem) -> Bool {
-        item.kind == .message &&
-            !item.isOwnMessage &&
-            item.id.hasPrefix("$") &&
-            !item.isDeleted
+        items.last(where: TimelineNotificationPolicy.isNotifiableIncomingMessage)
     }
 
     private func latestRemoteEventID(for roomID: RoomIdentifier) async -> String? {
