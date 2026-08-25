@@ -30,6 +30,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VERSION_HELPER="${SCRIPT_DIR}/next-date-build-version.py"
+VLCKIT_LOAD_HELPER="${SCRIPT_DIR}/verify-mediakit-vlckit-load.py"
 PROJECT_PATH="${ROOT_DIR}/MatrixClient.xcodeproj"
 ENTITLEMENTS_FILE="${ROOT_DIR}/Config/MatrixClient.entitlements"
 INFO_PLIST="${ROOT_DIR}/Config/MatrixClient-Info.plist"
@@ -107,6 +108,11 @@ fi
 
 if [[ ! -f "${VERSION_HELPER}" ]]; then
   echo "Version helper not found: ${VERSION_HELPER}" >&2
+  exit 1
+fi
+
+if [[ ! -f "${VLCKIT_LOAD_HELPER}" ]]; then
+  echo "VLCKit load helper not found: ${VLCKIT_LOAD_HELPER}" >&2
   exit 1
 fi
 
@@ -410,6 +416,44 @@ assemble_app_bundle() {
   if [[ -d "${app_frameworks_dir}/VLCKit.framework" ]]; then
     copy_tree "${app_frameworks_dir}/VLCKit.framework" "${mediakit_frameworks_dir}/VLCKit.framework"
   fi
+
+  local mediakit_binary
+  mediakit_binary="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "${mediakit_version_dir}/MediaKit")"
+  rewrite_mediakit_vlckit_load "${mediakit_binary}"
+  python3 "${VLCKIT_LOAD_HELPER}" --binary "${mediakit_binary}"
+}
+
+rewrite_mediakit_vlckit_load() {
+  local mediakit_binary="$1"
+  if [[ ! -f "${mediakit_binary}" ]]; then
+    echo "MediaKit binary not found: ${mediakit_binary}" >&2
+    exit 1
+  fi
+  if ! command -v otool >/dev/null 2>&1; then
+    echo "otool is required to rewrite MediaKit's VLCKit load command." >&2
+    exit 1
+  fi
+  if ! command -v install_name_tool >/dev/null 2>&1; then
+    echo "install_name_tool is required to rewrite MediaKit's VLCKit load command." >&2
+    exit 1
+  fi
+
+  local current_load rewritten_load
+  current_load="$(otool -L "${mediakit_binary}" | python3 "${VLCKIT_LOAD_HELPER}" --print-vlckit-load)"
+  rewritten_load="$(python3 "${VLCKIT_LOAD_HELPER}" --rewrite-load "${current_load}")"
+  if [[ "${current_load}" == "${rewritten_load}" ]]; then
+    echo "MediaKit VLCKit load command already nested: ${current_load}"
+    return
+  fi
+
+  # vlckit-spm/Xcode records @loader_path/../Frameworks/VLCKit..., which is a
+  # sibling of Versions/A. After the codesign-valid nest, dyld needs
+  # @loader_path/Frameworks/VLCKit...  LC_RPATH is unused: this is not @rpath.
+  echo "Rewriting MediaKit VLCKit load command:"
+  echo "  from ${current_load}"
+  echo "  to   ${rewritten_load}"
+  chmod u+w "${mediakit_binary}"
+  install_name_tool -change "${current_load}" "${rewritten_load}" "${mediakit_binary}"
 }
 
 stamp_release_versions_on_app() {

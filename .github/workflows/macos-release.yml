@@ -76,8 +76,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Verify date.build helper
-        run: python3 scripts/next-date-build-version.py --self-test
+      - name: Verify packaging helpers
+        run: |
+          python3 scripts/next-date-build-version.py --self-test
+          python3 scripts/verify-mediakit-vlckit-load.py --self-test
 
       - name: Install xcodegen
         run: brew install xcodegen
