@@ -61,6 +61,8 @@ targets:
     platform: macOS
     deploymentTarget: "14.0"
     sources:
+      # Directory globs include every Swift file. CodeQL autobuild does not run
+      # xcodegen, so new files must also be listed in MatrixClient.xcodeproj.
       - Sources/MatrixCore
     dependencies:
       - target: Persistence

@@ -18,6 +18,7 @@ final class MainWindowController: NSWindowController {
 
     private let state: WorkspaceStateController
     private let videoPlaybackEngine: any VideoPlaybackEngine
+    private let updater: GitHubReleaseUpdater
     private let splitViewController = NSSplitViewController()
     private lazy var loginViewController = LoginViewController(state: state)
     private var inspectorItem: NSSplitViewItem?
@@ -27,9 +28,10 @@ final class MainWindowController: NSWindowController {
     private var isRestoringInitialFrame = true
     private var userAdjustedWindowFrame = false
 
-    init(state: WorkspaceStateController, videoPlaybackEngine: any VideoPlaybackEngine) {
+    init(state: WorkspaceStateController, videoPlaybackEngine: any VideoPlaybackEngine, updater: GitHubReleaseUpdater) {
         self.state = state
         self.videoPlaybackEngine = videoPlaybackEngine
+        self.updater = updater
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: WindowMetrics.defaultSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -143,6 +145,10 @@ final class MainWindowController: NSWindowController {
         inspectorItem.isCollapsed = persistedInspectorCollapsed()
 
         toolbarController = buildToolbar()
+        updater.addObserver { [weak self] in
+            self?.refreshUpdateToolbarItem()
+        }
+        refreshUpdateToolbarItem()
 
         state.addSelectionObserver { [weak self] in
             guard let self else { return }
@@ -299,11 +305,28 @@ final class MainWindowController: NSWindowController {
         return candidateFrames.first(where: { $0.insetBy(dx: -WindowMetrics.screenMargin, dy: -WindowMetrics.screenMargin).intersects(frame) })
             ?? candidateFrames.first
     }
+
+    private func updatePresentation() {
+        switch state.sessionState {
+        case .connected:
+            window?.contentViewController = splitViewController
+            window?.toolbar = toolbarController
+            window?.title = state.currentWindowTitle
+        case .launching, .restoring, .signingIn, .signedOut:
+            window?.contentViewController = loginViewController
+            window?.toolbar = nil
+            window?.title = "Matrix Client"
+        }
+        isRestoringInitialFrame = true
+        restoreWindowFrameIfNeeded(centerIfReset: true)
+        scheduleWindowFrameStabilization(preferPersistedFrame: true, centerIfNeeded: true)
+        refreshUpdateToolbarItem()
+    }
 }
 
 extension MainWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleInspector, .exportBundle, .flexibleSpace]
+        [.toggleInspector, .updateReady, .exportBundle, .flexibleSpace]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -331,26 +354,59 @@ extension MainWindowController: NSToolbarDelegate {
             item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export support bundle")
             item.target = self
             item.action = #selector(exportSupportBundle(_:))
+        case .updateReady:
+            return makeUpdateToolbarItem()
         default:
             return nil
         }
         return item
     }
 
-    private func updatePresentation() {
-        switch state.sessionState {
-        case .connected:
-            window?.contentViewController = splitViewController
-            window?.toolbar = toolbarController
-            window?.title = state.currentWindowTitle
-        case .launching, .restoring, .signingIn, .signedOut:
-            window?.contentViewController = loginViewController
-            window?.toolbar = nil
-            window?.title = "Matrix Client"
+    @objc
+    private func relaunchForUpdate(_ sender: Any?) {
+        updater.relaunchIfReady()
+    }
+
+    private func makeUpdateToolbarItem() -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: .updateReady)
+        let button = NSButton(title: updater.status.toolbarTitle ?? "Update", target: self, action: #selector(relaunchForUpdate(_:)))
+        button.bezelStyle = .rounded
+        button.font = .systemFont(ofSize: 12, weight: .medium)
+        item.view = button
+        item.label = updater.status.toolbarTitle ?? "Update"
+        item.paletteLabel = "Install Update"
+        item.toolTip = updater.status.toolbarTooltip
+        item.minSize = NSSize(width: 168, height: 24)
+        item.maxSize = NSSize(width: 260, height: 28)
+        updateToolbarButton(button)
+        return item
+    }
+
+    private func refreshUpdateToolbarItem() {
+        guard let toolbar = toolbarController else { return }
+        let hasItem = toolbar.items.contains { $0.itemIdentifier == .updateReady }
+        let shouldShow = updater.status.toolbarTitle != nil
+        if shouldShow, !hasItem {
+            let index = max(toolbar.items.count - 1, 0)
+            toolbar.insertItem(withItemIdentifier: .updateReady, at: index)
+        } else if !shouldShow, hasItem, let existing = toolbar.items.firstIndex(where: { $0.itemIdentifier == .updateReady }) {
+            toolbar.removeItem(at: existing)
+        } else if shouldShow, let existing = toolbar.items.first(where: { $0.itemIdentifier == .updateReady }) {
+            existing.label = updater.status.toolbarTitle ?? "Update"
+            existing.toolTip = updater.status.toolbarTooltip
+            if let button = existing.view as? NSButton {
+                updateToolbarButton(button)
+            }
         }
-        isRestoringInitialFrame = true
-        restoreWindowFrameIfNeeded(centerIfReset: true)
-        scheduleWindowFrameStabilization(preferPersistedFrame: true, centerIfNeeded: true)
+    }
+
+    private func updateToolbarButton(_ button: NSButton) {
+        button.title = updater.status.toolbarTitle ?? "Update"
+        button.toolTip = updater.status.toolbarTooltip
+        button.isEnabled = {
+            if case .ready = updater.status { return true }
+            return false
+        }()
     }
 }
 
@@ -387,4 +443,5 @@ extension MainWindowController: NSWindowDelegate {
 private extension NSToolbarItem.Identifier {
     static let toggleInspector = NSToolbarItem.Identifier("toggleInspector")
     static let exportBundle = NSToolbarItem.Identifier("exportBundle")
+    static let updateReady = NSToolbarItem.Identifier("updateReady")
 }

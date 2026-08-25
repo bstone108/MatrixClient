@@ -550,6 +550,7 @@ public struct TimelineItem: Identifiable, Hashable, Codable, Sendable {
     public let transactionID: EventTransactionIdentifier?
     public let isDeleted: Bool
     public let deletedAt: Date?
+    public let isMention: Bool
 
     public init(
         id: String,
@@ -570,7 +571,8 @@ public struct TimelineItem: Identifiable, Hashable, Codable, Sendable {
         receipts: ReceiptSummary = ReceiptSummary(sentAt: nil, deliveredAt: nil, readReceipts: []),
         transactionID: EventTransactionIdentifier? = nil,
         isDeleted: Bool = false,
-        deletedAt: Date? = nil
+        deletedAt: Date? = nil,
+        isMention: Bool = false
     ) {
         self.id = id
         self.roomID = roomID
@@ -591,6 +593,62 @@ public struct TimelineItem: Identifiable, Hashable, Codable, Sendable {
         self.transactionID = transactionID
         self.isDeleted = isDeleted
         self.deletedAt = deletedAt
+        self.isMention = isMention
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        roomID = try container.decode(RoomIdentifier.self, forKey: .roomID)
+        senderID = try container.decode(String.self, forKey: .senderID)
+        senderDisplayName = try container.decode(String.self, forKey: .senderDisplayName)
+        body = try container.decode(String.self, forKey: .body)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        kind = try container.decode(TimelineItemKind.self, forKey: .kind)
+        media = try container.decodeIfPresent(TimelineMediaAttachment.self, forKey: .media)
+        status = try container.decodeIfPresent(TimelineStatusDetails.self, forKey: .status)
+        isOwnMessage = try container.decode(Bool.self, forKey: .isOwnMessage)
+        isEncrypted = try container.decode(Bool.self, forKey: .isEncrypted)
+        isEdited = try container.decodeIfPresent(Bool.self, forKey: .isEdited) ?? false
+        replyPreview = try container.decodeIfPresent(String.self, forKey: .replyPreview)
+        threadReplyCount = try container.decodeIfPresent(Int.self, forKey: .threadReplyCount) ?? 0
+        deliveryState = try container.decodeIfPresent(MessageDeliveryState.self, forKey: .deliveryState)
+        receipts = try container.decodeIfPresent(ReceiptSummary.self, forKey: .receipts)
+            ?? ReceiptSummary(sentAt: nil, deliveredAt: nil, readReceipts: [])
+        transactionID = try container.decodeIfPresent(EventTransactionIdentifier.self, forKey: .transactionID)
+        isDeleted = try container.decodeIfPresent(Bool.self, forKey: .isDeleted) ?? false
+        deletedAt = try container.decodeIfPresent(Date.self, forKey: .deletedAt)
+        isMention = try container.decodeIfPresent(Bool.self, forKey: .isMention) ?? false
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(roomID, forKey: .roomID)
+        try container.encode(senderID, forKey: .senderID)
+        try container.encode(senderDisplayName, forKey: .senderDisplayName)
+        try container.encode(body, forKey: .body)
+        try container.encode(timestamp, forKey: .timestamp)
+        try container.encode(kind, forKey: .kind)
+        try container.encodeIfPresent(media, forKey: .media)
+        try container.encodeIfPresent(status, forKey: .status)
+        try container.encode(isOwnMessage, forKey: .isOwnMessage)
+        try container.encode(isEncrypted, forKey: .isEncrypted)
+        try container.encode(isEdited, forKey: .isEdited)
+        try container.encodeIfPresent(replyPreview, forKey: .replyPreview)
+        try container.encode(threadReplyCount, forKey: .threadReplyCount)
+        try container.encodeIfPresent(deliveryState, forKey: .deliveryState)
+        try container.encode(receipts, forKey: .receipts)
+        try container.encodeIfPresent(transactionID, forKey: .transactionID)
+        try container.encode(isDeleted, forKey: .isDeleted)
+        try container.encodeIfPresent(deletedAt, forKey: .deletedAt)
+        try container.encode(isMention, forKey: .isMention)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, roomID, senderID, senderDisplayName, body, timestamp, kind, media, status
+        case isOwnMessage, isEncrypted, isEdited, replyPreview, threadReplyCount
+        case deliveryState, receipts, transactionID, isDeleted, deletedAt, isMention
     }
 }
 
@@ -604,6 +662,7 @@ public struct RoomNotificationEvent: Identifiable, Hashable, Codable, Sendable {
     public let eventID: String
     public let previewText: String
     public let timestamp: Date
+    public let isMention: Bool
 
     public var id: String {
         "\(accountID.rawValue)|\(roomID.rawValue)|\(eventID)"
@@ -618,7 +677,8 @@ public struct RoomNotificationEvent: Identifiable, Hashable, Codable, Sendable {
         senderDisplayName: String,
         eventID: String,
         previewText: String,
-        timestamp: Date
+        timestamp: Date,
+        isMention: Bool = false
     ) {
         self.accountID = accountID
         self.accountDisplayName = accountDisplayName
@@ -629,6 +689,7 @@ public struct RoomNotificationEvent: Identifiable, Hashable, Codable, Sendable {
         self.eventID = eventID
         self.previewText = previewText
         self.timestamp = timestamp
+        self.isMention = isMention
     }
 }
 

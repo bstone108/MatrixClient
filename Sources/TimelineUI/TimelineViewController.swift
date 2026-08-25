@@ -7,6 +7,7 @@ import MediaKit
 @MainActor
 public protocol TimelineWorkspaceState: AnyObject {
     var timelineItems: [TimelineItem] { get }
+    var timelineHistoryStatus: TimelineHistoryStatus { get }
     var selectedRoomSummary: RoomSummary? { get }
     var composerNotice: String? { get }
     func addTimelineObserver(_ observer: @escaping @MainActor () -> Void)
@@ -23,6 +24,7 @@ public protocol TimelineWorkspaceState: AnyObject {
     func sendMedia(_ attachment: OutgoingMediaAttachment)
     func joinSelectedRoom()
     func presentComposerNotice(_ message: String?)
+    func loadOlderTimelineHistory()
 }
 
 final class ReceiptAvatarBadgeView: NSView {
@@ -686,6 +688,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private let videoPlaybackEngine: any VideoPlaybackEngine
     private let titleField = NSTextField(labelWithString: "No Room Selected")
     private let subtitleField = NSTextField(labelWithString: "")
+    private let historyBannerField = NSTextField(labelWithString: "")
     private let emptyField = NSTextField(wrappingLabelWithString: "")
     private let tableView = NSTableView(frame: .zero)
     private let scrollView = FileDropScrollView(frame: .zero)
@@ -695,6 +698,8 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private var pendingReadMarkTask: Task<Void, Never>?
     private var pendingAttachments: [OutgoingMediaAttachment] = []
     private var didFocusComposerForCurrentRoom = false
+    private var isRestoringScroll = false
+    private var paginationDebounceTask: Task<Void, Never>?
 
     private var previewControllers: [MediaPreviewWindowController] = []
 
@@ -718,6 +723,9 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         titleField.font = .systemFont(ofSize: 18, weight: .semibold)
         subtitleField.font = .systemFont(ofSize: 12)
         subtitleField.textColor = .secondaryLabelColor
+        historyBannerField.font = .systemFont(ofSize: 11, weight: .medium)
+        historyBannerField.textColor = .secondaryLabelColor
+        historyBannerField.isHidden = true
         emptyField.font = .systemFont(ofSize: 13)
         emptyField.textColor = .secondaryLabelColor
         emptyField.alignment = .center
@@ -752,7 +760,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
         composerBar.host = self
 
-        let stack = NSStackView(views: [headerStack, scrollView, emptyField, composerBar])
+        let stack = NSStackView(views: [headerStack, historyBannerField, scrollView, emptyField, composerBar])
         stack.orientation = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -831,6 +839,8 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         }
         pendingReadMarkTask?.cancel()
         pendingReadMarkTask = nil
+        paginationDebounceTask?.cancel()
+        paginationDebounceTask = nil
     }
 
     public override func viewDidLayout() {
@@ -1017,6 +1027,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         scrollView.isDropEnabled = state.selectedRoomSummary?.membership == .joined
         reloadComposer()
         updateEmptyState()
+        updateHistoryBanner()
         focusComposerIfNeeded(force: !didFocusComposerForCurrentRoom)
     }
 
@@ -1029,25 +1040,17 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func reloadTimeline() {
-        let clipView = scrollView.contentView
-        let previousVisibleRect = clipView.documentVisibleRect
-        let previousOffset = clipView.bounds.origin.y
-        let wasAtBottom = previousVisibleRect.maxY >= max(tableView.bounds.height - Layout.autoScrollThreshold, 0)
         let composerWasFirst = view.window?.firstResponder === composerBar.textView
+        let anchor = currentScrollAnchor()
 
+        isRestoringScroll = true
         tableView.reloadData()
         tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<state.timelineItems.count))
         tableView.layoutSubtreeIfNeeded()
         updateEmptyState()
-
-        if wasAtBottom {
-            scrollToBottom()
-            scheduleMarkSelectedRoomAsRead()
-        } else {
-            let maxOffset = max(0, tableView.bounds.height - clipView.bounds.height)
-            clipView.scroll(to: NSPoint(x: 0, y: min(previousOffset, maxOffset)))
-            scrollView.reflectScrolledClipView(clipView)
-        }
+        updateHistoryBanner()
+        restoreScrollAnchor(anchor)
+        isRestoringScroll = false
 
         if composerWasFirst {
             focusComposerIfNeeded(force: true)
@@ -1088,8 +1091,78 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func handleTimelineScroll() {
-        guard isScrolledToBottom() else { return }
-        scheduleMarkSelectedRoomAsRead()
+        guard !isRestoringScroll else { return }
+        if isScrolledToBottom() {
+            scheduleMarkSelectedRoomAsRead()
+        }
+        requestOlderHistoryIfNeeded()
+    }
+
+    private func requestOlderHistoryIfNeeded() {
+        guard state.selectedRoomSummary?.membership == .joined else { return }
+        let reachedStart = state.timelineHistoryStatus == .noMoreHistory
+        let isLoading = state.timelineHistoryStatus == .loadingOlder
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let rows = tableView.rows(in: visibleRect)
+        let itemsAboveViewport = rows.location == NSNotFound ? state.timelineItems.count : max(0, rows.location)
+        guard TimelinePaginationPolicy.shouldLoadOlderWhileScrolling(
+            itemsAboveViewport: itemsAboveViewport,
+            reachedStart: reachedStart,
+            isLoading: isLoading
+        ) else { return }
+
+        paginationDebounceTask?.cancel()
+        paginationDebounceTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard let self, !Task.isCancelled else { return }
+            self.state.loadOlderTimelineHistory()
+        }
+    }
+
+    private func currentScrollAnchor() -> (isBottom: Bool, itemID: String?, offsetInViewport: CGFloat) {
+        if state.timelineItems.isEmpty || isScrolledToBottom() {
+            return (true, nil, 0)
+        }
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let rows = tableView.rows(in: visibleRect)
+        guard rows.location != NSNotFound, rows.length > 0,
+              state.timelineItems.indices.contains(rows.location) else {
+            return (true, nil, 0)
+        }
+        let row = rows.location
+        let rowRect = tableView.rect(ofRow: row)
+        return (false, state.timelineItems[row].id, rowRect.minY - visibleRect.minY)
+    }
+
+    private func restoreScrollAnchor(_ anchor: (isBottom: Bool, itemID: String?, offsetInViewport: CGFloat)) {
+        if anchor.isBottom {
+            scrollToBottom()
+            scheduleMarkSelectedRoomAsRead()
+            return
+        }
+        guard let itemID = anchor.itemID,
+              let row = state.timelineItems.firstIndex(where: { $0.id == itemID }) else {
+            return
+        }
+        tableView.layoutSubtreeIfNeeded()
+        let rowRect = tableView.rect(ofRow: row)
+        let clipView = scrollView.contentView
+        var origin = clipView.bounds.origin
+        origin.y = rowRect.minY - anchor.offsetInViewport
+        let maxOffset = max(0, tableView.bounds.height - clipView.bounds.height)
+        origin.y = min(max(origin.y, 0), maxOffset)
+        clipView.scroll(to: origin)
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    private func updateHistoryBanner() {
+        if let text = state.timelineHistoryStatus.bannerText {
+            historyBannerField.stringValue = text
+            historyBannerField.isHidden = false
+        } else {
+            historyBannerField.stringValue = ""
+            historyBannerField.isHidden = true
+        }
     }
 
     private func isScrolledToBottom() -> Bool {

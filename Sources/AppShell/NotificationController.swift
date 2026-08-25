@@ -114,6 +114,16 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
         let frontmostState = await stateSnapshot.frontmostState(for: event, appIsActive: appIsActive)
         guard !frontmostState.isSelectedRoom else { return }
 
+        let roomMode = RoomNotificationPreferenceStore(defaults: defaults).mode(
+            accountID: event.accountID,
+            roomID: event.roomID
+        )
+        guard MatrixMentionMatcher.shouldNotify(
+            mode: roomMode,
+            desktopNotificationsEnabled: true,
+            isMention: event.isMention
+        ) else { return }
+
         let content = UNMutableNotificationContent()
         content.title = event.roomDisplayName
         let accountSuffix = frontmostState.hasMultipleAccounts ? " • \(event.accountDisplayName)" : ""
@@ -182,6 +192,25 @@ final class NotificationController: NSObject, UNUserNotificationCenterDelegate {
             options.insert(.sound)
         }
         return options
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier else { return }
+        let userInfo = response.notification.request.content.userInfo
+        guard let accountID = userInfo["accountID"] as? String,
+              let roomID = userInfo["roomID"] as? String else {
+            return
+        }
+        await MainActor.run {
+            NSApp.activate(ignoringOtherApps: true)
+            state.revealRoom(
+                RoomIdentifier(rawValue: roomID),
+                accountID: AccountIdentifier(rawValue: accountID)
+            )
+        }
     }
 }
 

@@ -30,6 +30,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private var sessionTask: Task<Void, Never>?
     private var roomListTask: Task<Void, Never>?
     private var timelineTask: Task<Void, Never>?
+    private var historyTask: Task<Void, Never>?
     private var mediaTask: Task<Void, Never>?
     private var verificationTask: Task<Void, Never>?
     private var workerTask: Task<Void, Never>?
@@ -42,6 +43,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     public private(set) var spaces: [SpaceSummary] = []
     public private(set) var rooms: [RoomSummary] = []
     public private(set) var timelineItems: [TimelineItem] = []
+    public private(set) var timelineHistoryStatus: TimelineHistoryStatus = .idle
     public private(set) var mediaStates: [String: TimelineMediaLoadState] = [:]
     public private(set) var mediaWorkerSnapshots: [MediaDownloadWorkerSnapshot] = []
     public private(set) var verificationSnapshot: VerificationSnapshot = .initial
@@ -134,6 +136,38 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
 
     public func addComposerNoticeObserver(_ observer: @escaping @MainActor () -> Void) {
         composerNoticeObservers[UUID()] = observer
+    }
+
+    public func revealRoom(_ roomID: RoomIdentifier, accountID: AccountIdentifier) {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if selectedAccountID != accountID {
+                await loadAccount(accountID, restorePersistedSelection: false)
+            }
+            selectRoom(roomID)
+        }
+    }
+
+    public func roomNotificationMode(for roomID: RoomIdentifier) -> RoomNotificationMode {
+        guard let selectedAccountID else { return .allMessages }
+        return RoomNotificationPreferenceStore(defaults: defaults).mode(accountID: selectedAccountID, roomID: roomID)
+    }
+
+    public func setRoomNotificationMode(_ mode: RoomNotificationMode, for roomID: RoomIdentifier) {
+        guard let selectedAccountID else { return }
+        RoomNotificationPreferenceStore(defaults: defaults).setMode(mode, accountID: selectedAccountID, roomID: roomID)
+        notify(roomListObservers)
+        notify(inspectorObservers)
+        notify(selectionObservers)
+    }
+
+    public func loadOlderTimelineHistory() {
+        guard selectedRoomSummary?.membership == .joined else { return }
+        guard let selectedRoomID, let selectedAccountID else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.matrixClient.paginateOlderHistory(in: selectedRoomID, accountID: selectedAccountID)
+        }
     }
 
     public func selectAccount(_ accountID: AccountIdentifier) {
@@ -523,8 +557,10 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private func subscribeToRoomList() async {
         roomListTask?.cancel()
         timelineTask?.cancel()
+        historyTask?.cancel()
         mediaTask?.cancel()
         timelineItems = []
+        timelineHistoryStatus = .idle
         mediaStates = [:]
         notify(timelineObservers)
         notify(mediaObservers)
@@ -618,9 +654,12 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
 
     private func subscribeToTimeline() async {
         timelineTask?.cancel()
+        historyTask?.cancel()
         mediaTask?.cancel()
         mediaStates = [:]
+        timelineHistoryStatus = .idle
         notify(mediaObservers)
+        notify(timelineObservers)
 
         guard let selectedAccountID, let selectedRoomID else {
             timelineItems = []
@@ -629,12 +668,22 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         }
 
         let stream = await matrixClient.timelineStream(for: selectedAccountID, roomID: selectedRoomID)
+        let historyStream = await matrixClient.timelineHistoryStatusStream(for: selectedAccountID, roomID: selectedRoomID)
         let mediaStream = await matrixClient.mediaStateStream(for: selectedAccountID, roomID: selectedRoomID)
         timelineTask = Task { [weak self] in
             guard let self else { return }
             for await items in stream {
                 await MainActor.run {
                     self.timelineItems = items
+                    self.notify(self.timelineObservers)
+                }
+            }
+        }
+        historyTask = Task { [weak self] in
+            guard let self else { return }
+            for await status in historyStream {
+                await MainActor.run {
+                    self.timelineHistoryStatus = status
                     self.notify(self.timelineObservers)
                 }
             }
@@ -704,6 +753,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private func clearWorkspaceState() {
         roomListTask?.cancel()
         timelineTask?.cancel()
+        historyTask?.cancel()
         mediaTask?.cancel()
         verificationTask?.cancel()
         workerTask?.cancel()
@@ -711,6 +761,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         spaces = []
         rooms = []
         timelineItems = []
+        timelineHistoryStatus = .idle
         mediaStates = [:]
         mediaWorkerSnapshots = []
         verificationSnapshot = .initial
@@ -733,6 +784,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private func resetAccountScopedState() {
         roomListTask?.cancel()
         timelineTask?.cancel()
+        historyTask?.cancel()
         mediaTask?.cancel()
         verificationTask?.cancel()
         workerTask?.cancel()
@@ -740,6 +792,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         spaces = []
         rooms = []
         timelineItems = []
+        timelineHistoryStatus = .idle
         mediaStates = [:]
         mediaWorkerSnapshots = []
         verificationSnapshot = .initial

@@ -5,6 +5,7 @@ final class RoomListCellView: NSTableCellView {
     private let titleField = NSTextField(labelWithString: "")
     private let previewField = NSTextField(labelWithString: "")
     private let badgeField = NSTextField(labelWithString: "")
+    private let modeField = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -16,8 +17,10 @@ final class RoomListCellView: NSTableCellView {
         previewField.textColor = .secondaryLabelColor
         badgeField.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         badgeField.textColor = .controlAccentColor
+        modeField.font = .systemFont(ofSize: 10, weight: .medium)
+        modeField.textColor = .tertiaryLabelColor
 
-        let topRow = NSStackView(views: [titleField, NSView(), badgeField])
+        let topRow = NSStackView(views: [titleField, NSView(), modeField, badgeField])
         topRow.orientation = .horizontal
         topRow.alignment = .centerY
         let stack = NSStackView(views: [topRow, previewField])
@@ -38,10 +41,12 @@ final class RoomListCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(room: RoomSummary, selected: Bool) {
+    func configure(room: RoomSummary, selected: Bool, notificationMode: RoomNotificationMode) {
         titleField.stringValue = room.displayName
         previewField.stringValue = roomListPreview(for: room)
         badgeField.stringValue = room.unreadCount > 0 ? String(room.unreadCount) : ""
+        modeField.stringValue = notificationMode.shortLabel ?? ""
+        modeField.isHidden = notificationMode.shortLabel == nil
         titleField.font = .systemFont(ofSize: 13, weight: (selected || room.unreadCount > 0) ? .bold : .semibold)
         titleField.textColor = room.membership == .notJoined ? .systemRed : .labelColor
 
@@ -143,6 +148,7 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
         tableView.selectionHighlightStyle = .none
         tableView.intercellSpacing = NSSize(width: 0, height: 2)
         tableView.backgroundColor = .clear
+        tableView.menu = makeRoomMenu()
 
         let scrollView = NSScrollView(frame: .zero)
         scrollView.documentView = tableView
@@ -205,7 +211,11 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
                 newCell.identifier = identifier
                 return newCell
             }()
-            cell.configure(room: room, selected: state.selectedRoomID == room.roomID)
+            cell.configure(
+                room: room,
+                selected: state.selectedRoomID == room.roomID,
+                notificationMode: state.roomNotificationMode(for: room.roomID)
+            )
             return cell
         }
     }
@@ -282,5 +292,50 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
             appendSection("Other", rooms: other)
         }
         rows = grouped
+    }
+
+    private func makeRoomMenu() -> NSMenu {
+        let menu = NSMenu(title: "Room")
+        menu.autoenablesItems = false
+        menu.delegate = self
+        return menu
+    }
+
+    private func roomAtClickedRow() -> RoomSummary? {
+        let row = tableView.clickedRow >= 0 ? tableView.clickedRow : tableView.selectedRow
+        guard row >= 0, row < rows.count, case let .room(room) = rows[row] else {
+            return nil
+        }
+        return room
+    }
+
+    @objc
+    private func setClickedRoomNotificationMode(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = RoomNotificationMode(rawValue: raw),
+              let room = roomAtClickedRow() else {
+            return
+        }
+        state.setRoomNotificationMode(mode, for: room.roomID)
+    }
+}
+
+extension RoomListViewController: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        guard let room = roomAtClickedRow() else { return }
+        let current = state.roomNotificationMode(for: room.roomID)
+        for mode in RoomNotificationMode.allCases {
+            let item = NSMenuItem(
+                title: mode.title,
+                action: #selector(setClickedRoomNotificationMode(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = mode == current ? .on : .off
+            item.isEnabled = true
+            menu.addItem(item)
+        }
     }
 }

@@ -181,6 +181,16 @@ public actor MatrixClientService: MatrixClientFacade {
         return await session.timelineStream(roomID: roomID)
     }
 
+    public func timelineHistoryStatusStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<TimelineHistoryStatus> {
+        guard let session = sessions[accountID] else { return AsyncStream { _ in } }
+        return await session.timelineHistoryStatusStream(roomID: roomID)
+    }
+
+    public func paginateOlderHistory(in roomID: RoomIdentifier, accountID: AccountIdentifier) async {
+        guard let session = sessions[accountID] else { return }
+        await session.paginateOlderHistory(roomID: roomID)
+    }
+
     public func mediaStateStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<[String: TimelineMediaLoadState]> {
         guard let session = sessions[accountID] else { return AsyncStream { _ in } }
         return await session.mediaStateStream(roomID: roomID)

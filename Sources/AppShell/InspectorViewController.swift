@@ -8,6 +8,8 @@ final class InspectorViewController: NSViewController {
     private let topicField = NSTextField(wrappingLabelWithString: "")
     private let membersField = NSTextField(labelWithString: "")
     private let membershipField = NSTextField(labelWithString: "")
+    private let notificationsLabel = NSTextField(labelWithString: "Notifications")
+    private let notificationsPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let pinnedField = NSTextField(wrappingLabelWithString: "")
     private let joinButton = NSButton(title: "Join Room", target: nil, action: nil)
     private let downloadsSectionField = NSTextField(labelWithString: "Downloads")
@@ -37,6 +39,16 @@ final class InspectorViewController: NSViewController {
         topicField.maximumNumberOfLines = 0
         membersField.textColor = .secondaryLabelColor
         membershipField.textColor = .secondaryLabelColor
+        notificationsLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        notificationsLabel.textColor = .secondaryLabelColor
+        notificationsPopup.target = self
+        notificationsPopup.action = #selector(changeNotificationMode(_:))
+        notificationsPopup.setAccessibilityLabel("Room notification mode")
+        notificationsPopup.removeAllItems()
+        for mode in RoomNotificationMode.allCases {
+            notificationsPopup.addItem(withTitle: mode.title)
+            notificationsPopup.lastItem?.representedObject = mode.rawValue
+        }
         pinnedField.maximumNumberOfLines = 0
         pinnedField.textColor = .secondaryLabelColor
         joinButton.bezelStyle = .rounded
@@ -75,6 +87,8 @@ final class InspectorViewController: NSViewController {
             topicField,
             membersField,
             membershipField,
+            notificationsLabel,
+            notificationsPopup,
             joinButton,
             pinnedField
         ])
@@ -153,6 +167,7 @@ final class InspectorViewController: NSViewController {
             topicField.stringValue = details.topic.isEmpty ? "No room topic." : details.topic
             membersField.stringValue = "\(details.memberCount) members  •  \(details.isEncrypted ? "Encrypted" : "Unencrypted")"
             membershipField.stringValue = state.selectedRoomSummary?.membership.label ?? ""
+            updateNotificationPopup()
             joinButton.isHidden = state.selectedRoomSummary?.canJoin != true
             pinnedField.stringValue = details.pinnedMessages.isEmpty
                 ? "No pinned messages."
@@ -162,6 +177,7 @@ final class InspectorViewController: NSViewController {
             topicField.stringValue = summary.topic.isEmpty ? "No room topic." : summary.topic
             membersField.stringValue = summary.isEncrypted ? "Encrypted room" : "Unencrypted room"
             membershipField.stringValue = summary.membership.label
+            updateNotificationPopup()
             joinButton.isHidden = !summary.canJoin
             pinnedField.stringValue = summary.membership == .notJoined
                 ? "Join this room from the selected space to start syncing messages."
@@ -171,6 +187,7 @@ final class InspectorViewController: NSViewController {
             topicField.stringValue = "Select a room to inspect details, encryption state, and pinned items."
             membersField.stringValue = ""
             membershipField.stringValue = ""
+            updateNotificationPopup()
             joinButton.isHidden = true
             pinnedField.stringValue = ""
         }
@@ -192,6 +209,28 @@ final class InspectorViewController: NSViewController {
     @objc
     private func joinSelectedRoom() {
         state.joinSelectedRoom()
+    }
+
+    @objc
+    private func changeNotificationMode(_ sender: NSPopUpButton) {
+        guard let roomID = state.selectedRoomID,
+              let raw = sender.selectedItem?.representedObject as? String,
+              let mode = RoomNotificationMode(rawValue: raw) else {
+            return
+        }
+        state.setRoomNotificationMode(mode, for: roomID)
+    }
+
+    private func updateNotificationPopup() {
+        let hasRoom = state.selectedRoomID != nil
+        notificationsLabel.isHidden = !hasRoom
+        notificationsPopup.isHidden = !hasRoom
+        notificationsPopup.isEnabled = hasRoom
+        guard hasRoom, let roomID = state.selectedRoomID else { return }
+        let mode = state.roomNotificationMode(for: roomID)
+        if let index = RoomNotificationMode.allCases.firstIndex(of: mode) {
+            notificationsPopup.selectItem(at: index)
+        }
     }
 
     private func applyWorkerLines(_ snapshots: [MediaDownloadWorkerSnapshot], to fields: [NSTextField]) {

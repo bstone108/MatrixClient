@@ -90,7 +90,8 @@ public actor TimelineStore {
             ),
             transactionID: current.transactionID,
             isDeleted: current.isDeleted,
-            deletedAt: current.deletedAt
+            deletedAt: current.deletedAt,
+            isMention: current.isMention
         )
         itemsByRoom[roomID] = items
         broadcasters[roomID]?.yield(items)

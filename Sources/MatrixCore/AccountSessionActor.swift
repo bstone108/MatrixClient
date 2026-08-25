@@ -317,6 +317,12 @@ public actor AccountSessionActor {
     private var readMarkerOverridesByRoom: [RoomIdentifier: ReadMarkerOverride] = [:]
     private var backgroundRoomSweepTask: Task<Void, Never>?
     private var pendingSendMonitorTasks: [RoomIdentifier: Task<Void, Never>] = [:]
+    private var focusedTimelineRoomID: RoomIdentifier?
+    private var roomsWithInitialHistoryLoad: Set<RoomIdentifier> = []
+    private var roomsAtTimelineStart: Set<RoomIdentifier> = []
+    private var paginationInFlight: Set<RoomIdentifier> = []
+    private var historyStatusByRoom: [RoomIdentifier: TimelineHistoryStatus] = [:]
+    private var historyStatusBroadcasters: [RoomIdentifier: AsyncBroadcaster<TimelineHistoryStatus>] = [:]
     private var lastSpaceHierarchyRefreshAt: Date?
     private var verificationController: SessionVerificationController?
     private var verificationControllerDelegate: VerificationControllerDelegateProxy?
@@ -562,6 +568,7 @@ public actor AccountSessionActor {
     }
 
     public func timelineStream(roomID: RoomIdentifier) async -> AsyncStream<[TimelineItem]> {
+        focusedTimelineRoomID = roomID
         await mediaCache.setActiveRoom(roomID)
         await restorePersistedTimelinesIfNeeded(for: [roomID])
         let stream = await timelineStore.stream(for: roomID)
@@ -569,6 +576,7 @@ public actor AccountSessionActor {
             guard let self else { return }
             do {
                 try await self.ensureTimelineSubscription(for: roomID)
+                await self.loadInitialHistoryIfNeeded(for: roomID)
             } catch {
                 await self.diagnostics.record(.error, category: "Timeline", message: "Unable to initialize room timeline", metadata: [
                     "roomID": roomID.rawValue,
@@ -577,6 +585,143 @@ public actor AccountSessionActor {
             }
         }
         return stream
+    }
+
+    public func timelineHistoryStatusStream(roomID: RoomIdentifier) -> AsyncStream<TimelineHistoryStatus> {
+        if historyStatusBroadcasters[roomID] == nil {
+            historyStatusBroadcasters[roomID] = AsyncBroadcaster(initialValue: historyStatusByRoom[roomID] ?? .idle)
+        }
+        return historyStatusBroadcasters[roomID]!.stream()
+    }
+
+    public func paginateOlderHistory(roomID: RoomIdentifier) async {
+        guard focusedTimelineRoomID == roomID else { return }
+        guard !roomsAtTimelineStart.contains(roomID) else {
+            publishHistoryStatus(.noMoreHistory, for: roomID)
+            return
+        }
+        _ = await paginateBackwards(
+            roomID: roomID,
+            requestSize: TimelinePaginationPolicy.additionalPageSize,
+            reason: "scroll-back"
+        )
+    }
+
+    private func loadInitialHistoryIfNeeded(for roomID: RoomIdentifier) async {
+        guard focusedTimelineRoomID == roomID else { return }
+        guard roomsWithInitialHistoryLoad.insert(roomID).inserted else { return }
+
+        let joined = await isJoinedRoom(roomID)
+        guard joined else { return }
+
+        if roomsAtTimelineStart.contains(roomID) {
+            publishHistoryStatus(.noMoreHistory, for: roomID)
+            return
+        }
+
+        await waitForPendingTimelineDiffs(roomID: roomID)
+        if displayTimelineItemsByRoom[roomID, default: []].count < Int(TimelinePaginationPolicy.initialPageSize),
+           !roomsAtTimelineStart.contains(roomID) {
+            let reachedStart = await paginateBackwards(
+                roomID: roomID,
+                requestSize: TimelinePaginationPolicy.initialPageSize,
+                reason: "initial-open"
+            )
+            if reachedStart {
+                return
+            }
+        }
+
+        while focusedTimelineRoomID == roomID,
+              TimelinePaginationPolicy.shouldFillToMinimum(
+                loadedCount: displayTimelineItemsByRoom[roomID, default: []].count,
+                reachedStart: roomsAtTimelineStart.contains(roomID)
+              ) {
+            let reachedStart = await paginateBackwards(
+                roomID: roomID,
+                requestSize: TimelinePaginationPolicy.additionalPageSize,
+                reason: "initial-fill"
+            )
+            if reachedStart { return }
+        }
+    }
+
+    private func paginateBackwards(
+        roomID: RoomIdentifier,
+        requestSize: UInt16,
+        reason: String
+    ) async -> Bool {
+        guard focusedTimelineRoomID == roomID else { return roomsAtTimelineStart.contains(roomID) }
+        if roomsAtTimelineStart.contains(roomID) {
+            publishHistoryStatus(.noMoreHistory, for: roomID)
+            return true
+        }
+        guard paginationInFlight.insert(roomID).inserted else {
+            return roomsAtTimelineStart.contains(roomID)
+        }
+        defer { paginationInFlight.remove(roomID) }
+
+        publishHistoryStatus(.loadingOlder, for: roomID)
+        do {
+            try await ensureTimelineSubscription(for: roomID)
+            guard let subscription = timelineSubscriptions[roomID] else {
+                throw LiveMatrixSessionError.roomUnavailable(roomID.rawValue)
+            }
+            let reachedStart = try await subscription.timeline.paginateBackwards(numEvents: requestSize)
+            await waitForPendingTimelineDiffs(roomID: roomID)
+            if reachedStart {
+                roomsAtTimelineStart.insert(roomID)
+                publishHistoryStatus(.noMoreHistory, for: roomID)
+            } else if focusedTimelineRoomID == roomID {
+                publishHistoryStatus(.idle, for: roomID)
+            }
+            await diagnostics.record(.info, category: "Timeline", message: "Paginated room history backwards", metadata: [
+                "roomID": roomID.rawValue,
+                "reason": reason,
+                "requestSize": "\(requestSize)",
+                "reachedStart": reachedStart ? "true" : "false",
+                "displayCount": "\(displayTimelineItemsByRoom[roomID, default: []].count)"
+            ])
+            return reachedStart
+        } catch {
+            publishHistoryStatus(.failed("Couldn’t load earlier messages"), for: roomID)
+            await diagnostics.record(.error, category: "Timeline", message: "Failed to paginate room history", metadata: [
+                "roomID": roomID.rawValue,
+                "reason": reason,
+                "error": error.localizedDescription
+            ])
+            return roomsAtTimelineStart.contains(roomID)
+        }
+    }
+
+    private func waitForPendingTimelineDiffs(roomID: RoomIdentifier) async {
+        for _ in 0..<40 {
+            let hasPending = !(pendingTimelineDiffBatches[roomID] ?? []).isEmpty
+            let isProcessing = roomsProcessingTimelineDiffs.contains(roomID)
+            if !hasPending && !isProcessing {
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+    }
+
+    private func publishHistoryStatus(_ status: TimelineHistoryStatus, for roomID: RoomIdentifier) {
+        historyStatusByRoom[roomID] = status
+        if historyStatusBroadcasters[roomID] == nil {
+            historyStatusBroadcasters[roomID] = AsyncBroadcaster(initialValue: status)
+        } else {
+            historyStatusBroadcasters[roomID]?.yield(status)
+        }
+    }
+
+    private func isJoinedRoom(_ roomID: RoomIdentifier) async -> Bool {
+        if let room = classicRooms[roomID] {
+            return mapRoomMembership(room.membership()) == .joined
+        }
+        if let summary = await slidingSync.roomSummary(for: roomID) {
+            return summary.membership == .joined
+        }
+        return true
     }
 
     public func mediaStateStream(roomID: RoomIdentifier) async -> AsyncStream<[String: TimelineMediaLoadState]> {
@@ -819,6 +964,12 @@ public actor AccountSessionActor {
         notificationPrimedRoomIDs.removeAll()
         lastSeenNotificationEventIDByRoom.removeAll()
         lastMarkedReadEventIDByRoom.removeAll()
+        focusedTimelineRoomID = nil
+        roomsWithInitialHistoryLoad.removeAll()
+        roomsAtTimelineStart.removeAll()
+        paginationInFlight.removeAll()
+        historyStatusByRoom.removeAll()
+        historyStatusBroadcasters.removeAll()
         readMarkerOverridesByRoom.removeAll()
 
         await client.enableAllSendQueues(enable: false)
@@ -1490,11 +1641,9 @@ public actor AccountSessionActor {
         // vector. Merge with retained app history so a 20-item SDK window does
         // not discard older messages that were already persisted.
         let convertedRawItems = await convert(items: rawItems, roomID: roomID, room: room)
-        let sdkItems = retainedTimelineItems(
-            from: TimelineItemReconciler.chronologicallyOrdered(
-                TimelineItemReconciler.deduplicated(
-                    mergeResetTimelineItems(convertedRawItems, existingItems: previousSDKItems)
-                )
+        let sdkItems = TimelineItemReconciler.chronologicallyOrdered(
+            TimelineItemReconciler.deduplicated(
+                mergeResetTimelineItems(convertedRawItems, existingItems: previousSDKItems)
             )
         )
 
@@ -1618,7 +1767,6 @@ public actor AccountSessionActor {
         var current = sdkItems
         current = TimelineItemReconciler.deduplicated(current)
         current = TimelineItemReconciler.repairedPendingRemoteEchoes(in: current)
-        current = retainedTimelineItems(from: current)
         current = TimelineItemReconciler.normalizedReadReceipts(in: current)
         return current
     }
@@ -1823,7 +1971,8 @@ public actor AccountSessionActor {
                     receipts: resolvedItem.receipts.readReceipts.isEmpty ? item.receipts : resolvedItem.receipts,
                     transactionID: item.transactionID ?? resolvedItem.transactionID,
                     isDeleted: item.isDeleted || resolvedItem.isDeleted,
-                    deletedAt: resolvedItem.deletedAt ?? item.deletedAt
+                    deletedAt: resolvedItem.deletedAt ?? item.deletedAt,
+                    isMention: item.isMention || resolvedItem.isMention
                 )
             }
 
@@ -1845,7 +1994,7 @@ public actor AccountSessionActor {
                 guard !decodedItems.isEmpty else { continue }
 
                 let retainedItems = TimelineItemReconciler.normalizedReadReceipts(
-                    in: retainedTimelineItems(from: TimelineItemReconciler.deduplicated(decodedItems))
+                    in: TimelineItemReconciler.deduplicated(decodedItems)
                 )
                 displayTimelineItemsByRoom[roomID] = retainedItems
                 primeNotificationBaseline(for: roomID, items: retainedItems)
@@ -2613,19 +2762,20 @@ public actor AccountSessionActor {
             return nil
         }
 
-        let previousIDs = Set(previousItems.map(\.id))
         let lastSeenEventID = lastSeenNotificationEventIDByRoom[roomID]
         lastSeenNotificationEventIDByRoom[roomID] = latestIncomingEventID
 
-        guard let candidate = currentItems.reversed().first(where: { item in
-            isNotifiableIncomingMessage(item) &&
-                !previousIDs.contains(item.id) &&
-                item.id != lastSeenEventID
-        }) else {
-            return nil
+        let newerItems: ArraySlice<TimelineItem>
+        if let lastSeenEventID {
+            guard let lastSeenIndex = currentItems.lastIndex(where: { $0.id == lastSeenEventID }) else {
+                return nil
+            }
+            newerItems = currentItems.suffix(from: lastSeenIndex + 1)
+        } else {
+            newerItems = currentItems[...]
         }
 
-        guard await shouldDeliverNotification(for: roomID, room: room) else {
+        guard let candidate = newerItems.reversed().first(where: isNotifiableIncomingMessage) else {
             return nil
         }
 
@@ -2648,7 +2798,20 @@ public actor AccountSessionActor {
             senderDisplayName: candidate.senderDisplayName,
             eventID: candidate.id,
             previewText: previewText,
-            timestamp: candidate.timestamp
+            timestamp: candidate.timestamp,
+            isMention: candidate.isMention
+        )
+    }
+
+    private func messageMentionsCurrentUser(_ message: MessageContent?) -> Bool {
+        guard let message else { return false }
+        let mentionedUserIDs = message.mentions?.userIds ?? []
+        let mentionsRoom = message.mentions?.room ?? false
+        return MatrixMentionMatcher.isMention(
+            of: summary.userID,
+            mentionedUserIDs: mentionedUserIDs,
+            mentionsWholeRoom: mentionsRoom,
+            body: message.body
         )
     }
 
@@ -2661,22 +2824,6 @@ public actor AccountSessionActor {
             !item.isOwnMessage &&
             item.id.hasPrefix("$") &&
             !item.isDeleted
-    }
-
-    private func shouldDeliverNotification(for roomID: RoomIdentifier, room: Room) async -> Bool {
-        guard let roomInfo = try? await room.roomInfo() else {
-            return true
-        }
-
-        let effectiveMode = roomInfo.cachedUserDefinedNotificationMode
-        switch effectiveMode {
-        case .mute:
-            return false
-        case .mentionsAndKeywordsOnly:
-            return roomInfo.highlightCount > 0 || roomInfo.numUnreadMentions > 0
-        case .allMessages, .none:
-            return true
-        }
     }
 
     private func latestRemoteEventID(for roomID: RoomIdentifier) async -> String? {
@@ -2798,6 +2945,7 @@ public actor AccountSessionActor {
         } else {
             isDeleted = false
         }
+        let isMention = messageMentionsCurrentUser(message)
 
         return TimelineItem(
             id: eventID,
@@ -2818,7 +2966,8 @@ public actor AccountSessionActor {
             receipts: receipts,
             transactionID: transactionID,
             isDeleted: isDeleted,
-            deletedAt: isDeleted ? timestamp : nil
+            deletedAt: isDeleted ? timestamp : nil,
+            isMention: isMention
         )
     }
 

@@ -7,6 +7,7 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
     private var stateController: WorkspaceStateController?
     private var mainWindowController: MainWindowController?
     private var notificationController: NotificationController?
+    private var updater: GitHubReleaseUpdater?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -27,13 +28,21 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
             )
             self.notificationController = notificationController
 
+            let updater = GitHubReleaseUpdater(
+                diagnostics: environment.diagnostics,
+                applicationSupportURL: environment.database.paths.applicationSupportURL
+            )
+            self.updater = updater
+
             let controller = MainWindowController(
                 state: stateController,
-                videoPlaybackEngine: environment.videoPlaybackEngine
+                videoPlaybackEngine: environment.videoPlaybackEngine,
+                updater: updater
             )
             mainWindowController = controller
 
             buildMenu()
+            updater.start()
             controller.showAndFocusWindow()
             NSApp.activate(ignoringOtherApps: true)
             notificationController.start()
@@ -64,6 +73,11 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc
+    private func checkForUpdates(_ sender: Any?) {
+        updater?.checkForUpdates(force: true)
+    }
+
+    @objc
     private func exportSupportBundle(_ sender: Any?) {
         mainWindowController?.exportSupportBundle(sender)
     }
@@ -81,6 +95,14 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu(title: "Matrix Client")
         appMenuItem.submenu = appMenu
         appMenu.addItem(withTitle: "About Matrix Client", action: nil, keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let checkUpdatesItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        checkUpdatesItem.target = self
+        appMenu.addItem(checkUpdatesItem)
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit Matrix Client", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
