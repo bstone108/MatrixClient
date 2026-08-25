@@ -67,6 +67,11 @@
 		C6E7295328368EE3F9E62D68 /* AccountSessionActor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E62148665ED867021A3AC703 /* AccountSessionActor.swift */; };
 		A11111111111111111111101 /* ClassicSyncWatchdogPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11111111111111111111103 /* ClassicSyncWatchdogPolicy.swift */; };
 		A11111111111111111111102 /* ClassicSyncWatchdogPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11111111111111111111104 /* ClassicSyncWatchdogPolicyTests.swift */; };
+		B22222222222222222222211 /* OutgoingMediaAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22222222222222222222201 /* OutgoingMediaAttachment.swift */; };
+		B22222222222222222222212 /* MatrixSDKMediaSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22222222222222222222202 /* MatrixSDKMediaSender.swift */; };
+		B22222222222222222222213 /* ComposerBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22222222222222222222203 /* ComposerBarView.swift */; };
+		B22222222222222222222214 /* ComposerMediaFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22222222222222222222204 /* ComposerMediaFactory.swift */; };
+		B22222222222222222222215 /* OutgoingMediaAttachmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B22222222222222222222205 /* OutgoingMediaAttachmentTests.swift */; };
 		C7A29B6B7AD6E0652EB66216 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
 		C8DED00A1B883675B8C88630 /* Persistence.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; };
 		CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903044045DB8284FCED08DC5 /* LoginViewController.swift */; };
@@ -294,6 +299,11 @@
 		A3DA26EFE66740A1D2D898D8 /* TimelineItemReconciler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineItemReconciler.swift; sourceTree = "<group>"; };
 		A11111111111111111111103 /* ClassicSyncWatchdogPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicSyncWatchdogPolicy.swift; sourceTree = "<group>"; };
 		A11111111111111111111104 /* ClassicSyncWatchdogPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassicSyncWatchdogPolicyTests.swift; sourceTree = "<group>"; };
+		B22222222222222222222201 /* OutgoingMediaAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutgoingMediaAttachment.swift; sourceTree = "<group>"; };
+		B22222222222222222222202 /* MatrixSDKMediaSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixSDKMediaSender.swift; sourceTree = "<group>"; };
+		B22222222222222222222203 /* ComposerBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerBarView.swift; sourceTree = "<group>"; };
+		B22222222222222222222204 /* ComposerMediaFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerMediaFactory.swift; sourceTree = "<group>"; };
+		B22222222222222222222205 /* OutgoingMediaAttachmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OutgoingMediaAttachmentTests.swift; sourceTree = "<group>"; };
 		AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlidingSyncCoordinator.swift; sourceTree = "<group>"; };
 		AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLoginSmokeTests.swift; sourceTree = "<group>"; };
 		B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineItemReconcilerTests.swift; sourceTree = "<group>"; };
@@ -408,6 +418,7 @@
 				A11111111111111111111104 /* ClassicSyncWatchdogPolicyTests.swift */,
 				AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */,
 				493E7116FB128D536437C7C0 /* MessageDeliveryStateTests.swift */,
+				B22222222222222222222205 /* OutgoingMediaAttachmentTests.swift */,
 				32B77D4D00D2035323498958 /* ReliableSendQueueTests.swift */,
 				CB75C3F75478352F892E6FD8 /* SlidingSyncCoordinatorTests.swift */,
 				B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */,
@@ -470,7 +481,9 @@
 				902079BA570A51652EED1765 /* MatrixMediaCache.swift */,
 				57FEEDFDADE3926D1D9EACF8 /* MatrixRustSDK+Concurrency.swift */,
 				448C85273EC941D82FFD2D53 /* MatrixSDKBridge.swift */,
+				B22222222222222222222202 /* MatrixSDKMediaSender.swift */,
 				1B9BC5D307DDBD3C0F3A81B0 /* Models.swift */,
+				B22222222222222222222201 /* OutgoingMediaAttachment.swift */,
 				4574673C914FE73209199B85 /* ReceiptAvatarCache.swift */,
 				04505453266AAAEE352288CD /* ReliableSendQueue.swift */,
 				AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */,
@@ -494,6 +507,8 @@
 		7F0E37354B2AC197ECF82412 /* TimelineUI */ = {
 			isa = PBXGroup;
 			children = (
+				B22222222222222222222203 /* ComposerBarView.swift */,
+				B22222222222222222222204 /* ComposerMediaFactory.swift */,
 				DEBC730AAC1F45D619CF7A97 /* MediaPreviewWindowController.swift */,
 				9E7942585CE1A65AE71243CC /* TimelineViewController.swift */,
 			);
@@ -874,6 +889,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B22222222222222222222213 /* ComposerBarView.swift in Sources */,
+				B22222222222222222222214 /* ComposerMediaFactory.swift in Sources */,
 				C359CB13EDE0C3E6FE97A28B /* MediaPreviewWindowController.swift in Sources */,
 				2A69FCF2DEF3D9600AB74D6A /* TimelineViewController.swift in Sources */,
 			);
@@ -922,7 +939,9 @@
 				9425190B1370F11A666F3B9F /* MatrixMediaCache.swift in Sources */,
 				F04877FE6D958ECF825592DD /* MatrixRustSDK+Concurrency.swift in Sources */,
 				2B1BB1CE5F2578B28CC9BD0E /* MatrixSDKBridge.swift in Sources */,
+				B22222222222222222222212 /* MatrixSDKMediaSender.swift in Sources */,
 				24C639AE1FFAA784284205BC /* Models.swift in Sources */,
+				B22222222222222222222211 /* OutgoingMediaAttachment.swift in Sources */,
 				F5B1B9CA4F7824FB8FC83B7D /* ReceiptAvatarCache.swift in Sources */,
 				37BC707C8CBB0767A39CFFF2 /* ReliableSendQueue.swift in Sources */,
 				BDDFE5441D29A56D9A6F85F3 /* SlidingSyncCoordinator.swift in Sources */,
@@ -939,6 +958,7 @@
 				A11111111111111111111102 /* ClassicSyncWatchdogPolicyTests.swift in Sources */,
 				DFD1723297B94E9E077623C1 /* LiveLoginSmokeTests.swift in Sources */,
 				25E251D1AE13585A355DA191 /* MessageDeliveryStateTests.swift in Sources */,
+				B22222222222222222222215 /* OutgoingMediaAttachmentTests.swift in Sources */,
 				0FF76DB30DA9F1C719A8D399 /* ReliableSendQueueTests.swift in Sources */,
 				EEC85F734E5986E1FF3098C7 /* SlidingSyncCoordinatorTests.swift in Sources */,
 				E357D0CDBDD047E680482BA3 /* TimelineItemReconcilerTests.swift in Sources */,
