@@ -13,21 +13,75 @@ set -euo pipefail
 #   APPLE_APP_SPECIFIC_PASSWORD
 #   APPLE_TEAM_ID
 #
+# Versioning:
+#   MATRIXCLIENT_RELEASE=1  assign YYYY.M.D.N (America/Chicago) for a real
+#                           GitHub release. N is max(existing tag/release)+1.
+#   MATRIXCLIENT_VERSION    when releasing from an already-pushed vYYYY.M.D.N
+#                           tag, use that version instead of incrementing.
+#   Pull-request / verification runs must leave MATRIXCLIENT_RELEASE unset.
+#   They keep the committed Info.plist template (0.1.0 / 1) inside the bundle
+#   and name artifacts with a non-release label (default: ci).
+#
 # Optional:
 #   MACOS_REQUIRE_NOTARIZATION=1  force notarization even outside Actions
 #   MACOS_NOTARY_TIMEOUT          notarytool --timeout (default 45m)
-
-if [[ "$(uname -s)" != "Darwin" ]]; then
-  echo "This packaging script must be run on macOS." >&2
-  exit 1
-fi
+#   MATRIXCLIENT_CI_VERSION_LABEL artifact label for non-release runs (ci)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+VERSION_HELPER="${SCRIPT_DIR}/next-date-build-version.py"
 PROJECT_PATH="${ROOT_DIR}/MatrixClient.xcodeproj"
 ENTITLEMENTS_FILE="${ROOT_DIR}/Config/MatrixClient.entitlements"
 INFO_PLIST="${ROOT_DIR}/Config/MatrixClient-Info.plist"
 APP_NAME="MatrixClient"
+CI_VERSION_LABEL="${MATRIXCLIENT_CI_VERSION_LABEL:-ci}"
+
+is_release_packaging() {
+  [[ "${MATRIXCLIENT_RELEASE:-0}" == "1" ]]
+}
+
+looks_like_date_build() {
+  [[ "${1:-}" =~ ^[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])\.[1-9][0-9]*$ ]]
+}
+
+resolve_packaging_version() {
+  if is_release_packaging; then
+    local version
+    if [[ -n "${MATRIXCLIENT_VERSION:-}" ]]; then
+      version="$(python3 "${VERSION_HELPER}" --from-tag "${MATRIXCLIENT_VERSION}")"
+    else
+      version="$(python3 "${VERSION_HELPER}")"
+    fi
+    if [[ -z "${version}" ]] || ! looks_like_date_build "${version}"; then
+      echo "Failed to assign a date.build release version (got: ${version:-empty})." >&2
+      exit 1
+    fi
+    APP_VERSION="${version}"
+    BUNDLE_VERSION="${version}"
+    echo "Release version ${APP_VERSION} (America/Chicago date.build)" >&2
+    return
+  fi
+
+  APP_VERSION="${CI_VERSION_LABEL}"
+  BUNDLE_VERSION="${CI_VERSION_LABEL}"
+  if looks_like_date_build "${APP_VERSION}"; then
+    echo "CI/test artifact label ${APP_VERSION} looks like a shipped date.build; refusing to consume a release number." >&2
+    exit 1
+  fi
+  echo "CI/test packaging label ${APP_VERSION} (not a release; Info.plist template is left unstamped)" >&2
+}
+
+if [[ "${1:-}" == "--print-version" ]]; then
+  resolve_packaging_version
+  printf '%s\n' "${APP_VERSION}"
+  exit 0
+fi
+
+if [[ "$(uname -s)" != "Darwin" ]]; then
+  echo "This packaging script must be run on macOS (except --print-version)." >&2
+  exit 1
+fi
+
 ARCH="$(uname -m)"
 CODESIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-}"
 NOTARY_TIMEOUT="${MACOS_NOTARY_TIMEOUT:-45m}"
@@ -51,12 +105,12 @@ if [[ ! -f "${INFO_PLIST}" ]]; then
   exit 1
 fi
 
-APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${INFO_PLIST}")"
-BUNDLE_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${INFO_PLIST}")"
-if [[ -z "${APP_VERSION}" ]]; then
-  echo "CFBundleShortVersionString is empty in ${INFO_PLIST}" >&2
+if [[ ! -f "${VERSION_HELPER}" ]]; then
+  echo "Version helper not found: ${VERSION_HELPER}" >&2
   exit 1
 fi
+
+resolve_packaging_version
 
 using_developer_id() {
   [[ -n "${CODESIGN_IDENTITY}" && "${CODESIGN_IDENTITY}" != "-" ]]
@@ -358,6 +412,35 @@ assemble_app_bundle() {
   fi
 }
 
+stamp_release_versions_on_app() {
+  local app_bundle="$1"
+  local plist="${app_bundle}/Contents/Info.plist"
+  if [[ ! -f "${plist}" ]]; then
+    echo "Staged Info.plist not found: ${plist}" >&2
+    exit 1
+  fi
+
+  if ! is_release_packaging; then
+    echo "CI/test build: leaving template versions in ${plist}"
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${plist}" || true
+    /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${plist}" || true
+    return
+  fi
+
+  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" "${plist}"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${APP_VERSION}" "${plist}"
+
+  local short_version
+  local bundle_version
+  short_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "${plist}")"
+  bundle_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "${plist}")"
+  if [[ "${short_version}" != "${APP_VERSION}" || "${bundle_version}" != "${APP_VERSION}" ]]; then
+    echo "Failed to stamp ${plist} with ${APP_VERSION} (got ${short_version} / ${bundle_version})." >&2
+    exit 1
+  fi
+  echo "Stamped ${plist} CFBundleShortVersionString=${short_version} CFBundleVersion=${bundle_version}"
+}
+
 rm_rf "${WORK_DIR}" "${DERIVED_DATA_PATH}" "${STAGING_BUILD_DIR}"
 mkdir -p "${WORK_DIR}" "${STAGING_BUILD_DIR}" "${DELIVERABLE_DIR}"
 
@@ -389,6 +472,10 @@ if [[ ! -f "${STAGED_APP}/Contents/MacOS/${APP_NAME}" ]]; then
   echo "Missing app executable: ${STAGED_APP}/Contents/MacOS/${APP_NAME}" >&2
   exit 1
 fi
+
+# Stamp before codesign so the sealed Info.plist matches the artifact/tag.
+# Never rewrite Config/MatrixClient-Info.plist in git.
+stamp_release_versions_on_app "${STAGED_APP}"
 
 sign_app_bundle "${STAGED_APP}"
 
