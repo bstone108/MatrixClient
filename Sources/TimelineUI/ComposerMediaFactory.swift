@@ -40,10 +40,14 @@ enum ComposerMediaFactory {
             throw MatrixSendError.fileUnreadable(filename)
         }
 
-        let rawSize = values.fileSize.map(Int64.init)
-            ?? (try FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber)?.int64Value
-            ?? 0
-        let fileSize = UInt64(max(0, rawSize))
+        let fallbackSize: Int64
+        if let size = values.fileSize {
+            fallbackSize = Int64(size)
+        } else {
+            let attributes = try FileManager.default.attributesOfItem(atPath: path)
+            fallbackSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+        }
+        let fileSize = UInt64(max(0, fallbackSize))
         let mimeType = mimeType(for: values.contentType, filename: filename)
         let kind = MediaAttachmentClassifier.kind(forMimeType: mimeType)
         let pixelSize = (kind == .image || kind == .video) ? imagePixelSize(at: resolved) : nil

@@ -909,11 +909,11 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     @objc
-    func attachFile(_ sender: Any?) {
+    public func attachFile(_ sender: Any?) {
         composerDidRequestAttach()
     }
 
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         if menuItem.action == #selector(attachFile(_:)) {
             return state.selectedRoomSummary?.membership == .joined
         }
