@@ -21,6 +21,7 @@ jobs:
     name: Decide packaging mode
     runs-on: ubuntu-24.04
     outputs:
+      compile: ${{ steps.decide.outputs.compile }}
       package: ${{ steps.decide.outputs.package }}
       release: ${{ steps.decide.outputs.release }}
     steps:
@@ -34,13 +35,15 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            echo "PR/test run: sign and notarize only; do not assign date.build or publish."
-            echo "package=1" >> "${GITHUB_OUTPUT}"
+            echo "PR/test run: compile only; do not sign, notarize, assign date.build, or publish."
+            echo "compile=1" >> "${GITHUB_OUTPUT}"
+            echo "package=0" >> "${GITHUB_OUTPUT}"
             echo "release=0" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
             echo "workflow_dispatch: assign next America/Chicago date.build and publish."
+            echo "compile=0" >> "${GITHUB_OUTPUT}"
             echo "package=1" >> "${GITHUB_OUTPUT}"
             echo "release=1" >> "${GITHUB_OUTPUT}"
             exit 0
@@ -48,20 +51,58 @@ jobs:
           if [[ "${EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/v* ]]; then
             if gh release view "${REF_NAME}" --repo "${GH_REPO}" >/dev/null 2>&1; then
               echo "Tag ${REF_NAME} already has a GitHub release; skipping the tag-triggered rebuild."
+              echo "compile=0" >> "${GITHUB_OUTPUT}"
               echo "package=0" >> "${GITHUB_OUTPUT}"
               echo "release=0" >> "${GITHUB_OUTPUT}"
               exit 0
             fi
             echo "Tag ${REF_NAME} has no release yet; package that version and publish."
+            echo "compile=0" >> "${GITHUB_OUTPUT}"
             echo "package=1" >> "${GITHUB_OUTPUT}"
             echo "release=1" >> "${GITHUB_OUTPUT}"
             exit 0
           fi
           echo "Unsupported event ${EVENT_NAME}; skipping."
+          echo "compile=0" >> "${GITHUB_OUTPUT}"
           echo "package=0" >> "${GITHUB_OUTPUT}"
           echo "release=0" >> "${GITHUB_OUTPUT}"
 
-  build-macos:
+  compile-macos:
+    name: Compile Release
+    needs: gate
+    if: needs.gate.outputs.compile == '1'
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Verify packaging helpers
+        run: |
+          python3 scripts/next-date-build-version.py --self-test
+          python3 scripts/verify-mediakit-vlckit-load.py --self-test
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate --spec project.yml
+
+      - name: Compile Release without signing
+        run: |
+          set -euo pipefail
+          ARCH="$(uname -m)"
+          xcodebuild \
+            -project MatrixClient.xcodeproj \
+            -scheme MatrixClient \
+            -configuration Release \
+            -derivedDataPath "${RUNNER_TEMP}/MatrixClientCompileDerivedData" \
+            ARCHS="${ARCH}" \
+            ONLY_ACTIVE_ARCH=YES \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+  package-macos:
     name: Sign, notarize, and staple
     needs: gate
     if: needs.gate.outputs.package == '1'
@@ -128,7 +169,7 @@ jobs:
     if: needs.gate.outputs.release == '1'
     needs:
       - gate
-      - build-macos
+      - package-macos
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -136,14 +177,14 @@ jobs:
       - name: Download macOS artifacts
         uses: actions/download-artifact@v5
         with:
-          name: MatrixClient-${{ needs.build-macos.outputs.app_version }}-macos-${{ needs.build-macos.outputs.arch }}
+          name: MatrixClient-${{ needs.package-macos.outputs.app_version }}-macos-${{ needs.package-macos.outputs.arch }}
           path: release-artifacts/macos
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          APP_VERSION: ${{ needs.build-macos.outputs.app_version }}
+          APP_VERSION: ${{ needs.package-macos.outputs.app_version }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
