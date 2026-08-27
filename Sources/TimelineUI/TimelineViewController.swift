@@ -399,6 +399,7 @@ final class TimelineMediaCellView: NSTableCellView {
         previewButton.translatesAutoresizingMaskIntoConstraints = false
         previewButton.target = self
         previewButton.action = #selector(openRequested)
+        previewButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
         progressIndicator.isIndeterminate = false
         progressIndicator.controlSize = .small
@@ -458,8 +459,6 @@ final class TimelineMediaCellView: NSTableCellView {
     ) {
         let itemDidChange = representedItemID != item.id
         representedItemID = item.id
-        previewTask?.cancel()
-        previewTask = nil
 
         senderField.stringValue = item.senderDisplayName
         captionField.stringValue = TimelineCellFormatting.mediaCaption(for: item)
@@ -470,6 +469,8 @@ final class TimelineMediaCellView: NSTableCellView {
         )
 
         if itemDidChange {
+            previewTask?.cancel()
+            previewTask = nil
             previewSourceURL = nil
             hasResolvedPreviewImage = false
             setFallbackPreview(for: item)
@@ -537,8 +538,16 @@ final class TimelineMediaCellView: NSTableCellView {
             return
         }
 
-        if previewSourceURL == previewURL, hasResolvedPreviewImage {
-            return
+        // Prefetch progress republishes media state frequently. Cancelling the
+        // in-flight decode on every tick leaves the placeholder up until click.
+        if previewSourceURL == previewURL {
+            if hasResolvedPreviewImage { return }
+            if previewTask != nil { return }
+        } else {
+            previewTask?.cancel()
+            previewTask = nil
+            hasResolvedPreviewImage = false
+            previewSourceURL = previewURL
         }
 
         let itemID = item.id
@@ -548,6 +557,7 @@ final class TimelineMediaCellView: NSTableCellView {
             guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard self.representedItemID == itemID, self.previewSourceURL == previewURL else { return }
+                self.previewTask = nil
                 if let image {
                     self.previewButton.image = image
                     self.previewButton.title = ""
@@ -597,7 +607,9 @@ final class TimelineMediaCellView: NSTableCellView {
             return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
         }.value
         if let cgImage {
-            return NSImage(cgImage: cgImage, size: .zero)
+            let height = Layout.imagePreviewHeight
+            let width = height * CGFloat(cgImage.width) / CGFloat(max(cgImage.height, 1))
+            return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
         }
         let data = await Task.detached(priority: .utility) {
             try? Data(contentsOf: url)
@@ -1096,15 +1108,22 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     private func refreshVisibleMediaRows() {
         guard !state.timelineItems.isEmpty else { return }
+
+        var heightsNeedUpdate = IndexSet()
+        for (row, item) in state.timelineItems.enumerated() where item.media != nil {
+            heightsNeedUpdate.insert(row)
+        }
+        if !heightsNeedUpdate.isEmpty {
+            tableView.noteHeightOfRows(withIndexesChanged: heightsNeedUpdate)
+        }
+
         let visibleRect = scrollView.contentView.documentVisibleRect
         let rows = tableView.rows(in: visibleRect)
         guard rows.location != NSNotFound, rows.length > 0 else { return }
 
-        var heightsNeedUpdate = IndexSet()
         for row in rows.location..<(rows.location + rows.length) where tableView.numberOfRows > row {
             let item = state.timelineItems[row]
             guard item.media != nil else { continue }
-            heightsNeedUpdate.insert(row)
             guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineMediaCellView else {
                 continue
             }
@@ -1116,9 +1135,6 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             cell.onOpenRequested = { [weak self] in
                 self?.openMedia(for: item)
             }
-        }
-        if !heightsNeedUpdate.isEmpty {
-            tableView.noteHeightOfRows(withIndexesChanged: heightsNeedUpdate)
         }
     }
 
