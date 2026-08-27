@@ -71,6 +71,8 @@ jobs:
     name: Compile Release
     needs: gate
     if: needs.gate.outputs.compile == '1'
+    # One macos-15 job: ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO. vlckit-spm
+    # 3.6.0 ships macos-arm64_x86_64, so this is a real universal .app.
     runs-on: macos-15
     steps:
       - name: Check out repository
@@ -80,27 +82,13 @@ jobs:
         run: |
           python3 scripts/next-date-build-version.py --self-test
           python3 scripts/verify-mediakit-vlckit-load.py --self-test
+          python3 scripts/verify-macos-slices.py --self-test
 
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate --spec project.yml
-
-      - name: Compile Release without signing
-        run: |
-          set -euo pipefail
-          ARCH="$(uname -m)"
-          xcodebuild \
-            -project MatrixClient.xcodeproj \
-            -scheme MatrixClient \
-            -configuration Release \
-            -derivedDataPath "${RUNNER_TEMP}/MatrixClientCompileDerivedData" \
-            ARCHS="${ARCH}" \
-            ONLY_ACTIVE_ARCH=YES \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
-            build
+      - name: Compile unsigned universal Release
+        run: ./scripts/package-macos.sh --compile-only
 
   package-macos:
     name: Sign, notarize, and staple
@@ -121,6 +109,7 @@ jobs:
         run: |
           python3 scripts/next-date-build-version.py --self-test
           python3 scripts/verify-mediakit-vlckit-load.py --self-test
+          python3 scripts/verify-macos-slices.py --self-test
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -194,7 +183,7 @@ jobs:
           fi
           tag="v${APP_VERSION}"
           title="MatrixClient ${APP_VERSION}"
-          notes="Developer ID-signed and notarized macOS build for ${APP_VERSION}."
+          notes="Developer ID-signed, notarized, and stapled universal macOS build (Apple Silicon and Intel) for ${APP_VERSION}."
           mapfile -d '' assets < <(find release-artifacts -type f -print0)
           if gh release view "${tag}" --repo "${GH_REPO}" >/dev/null 2>&1; then
             echo "Release ${tag} already exists; refusing to clobber." >&2

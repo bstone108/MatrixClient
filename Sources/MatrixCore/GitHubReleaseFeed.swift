@@ -23,11 +23,20 @@ public struct GitHubReleaseSummary: Hashable, Sendable {
 
     public func macOSDiskImage(architecture: String) -> GitHubReleaseAsset? {
         let arch = architecture.lowercased()
-        let suffix = "-macos-\(arch).dmg"
-        return assets.first { asset in
-            let name = asset.name.lowercased()
-            return name.hasPrefix("matrixclient-") && name.hasSuffix(suffix)
+        let suffixes = [
+            "-macos-universal.dmg",
+            "-macos-arm64_x86_64.dmg",
+            "-macos-\(arch).dmg",
+        ]
+        for suffix in suffixes {
+            if let asset = assets.first(where: { asset in
+                let name = asset.name.lowercased()
+                return name.hasPrefix("matrixclient-") && name.hasSuffix(suffix)
+            }) {
+                return asset
+            }
         }
+        return nil
     }
 }
 
