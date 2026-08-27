@@ -72,7 +72,7 @@ func githubReleaseFeedDoesNotOfferCurrentOrOlderBuilds() throws {
 }
 
 @Test
-func githubReleaseFeedPrefersUniversalDmgForAppleSiliconAndIntel() throws {
+func githubReleaseFeedPicksMatchingArchDmg() throws {
     let json = """
     [
       {
@@ -80,9 +80,10 @@ func githubReleaseFeedPrefersUniversalDmgForAppleSiliconAndIntel() throws {
         "draft": false,
         "prerelease": false,
         "assets": [
-          {"name": "MatrixClient-2026.8.27.1-macos-universal.dmg", "browser_download_url": "https://example.test/universal.dmg"},
-          {"name": "MatrixClient-2026.8.27.1-macos-universal.zip", "browser_download_url": "https://example.test/universal.zip"},
-          {"name": "MatrixClient-2026.8.27.1-macos-arm64.dmg", "browser_download_url": "https://example.test/legacy-arm.dmg"}
+          {"name": "MatrixClient-2026.8.27.1-macos-arm64.dmg", "browser_download_url": "https://example.test/arm.dmg"},
+          {"name": "MatrixClient-2026.8.27.1-macos-arm64.zip", "browser_download_url": "https://example.test/arm.zip"},
+          {"name": "MatrixClient-2026.8.27.1-macos-x86_64.dmg", "browser_download_url": "https://example.test/intel.dmg"},
+          {"name": "MatrixClient-2026.8.27.1-macos-x86_64.zip", "browser_download_url": "https://example.test/intel.zip"}
         ]
       }
     ]
@@ -91,8 +92,8 @@ func githubReleaseFeedPrefersUniversalDmgForAppleSiliconAndIntel() throws {
     let current = DateBuildVersion.parse("2026.8.25.2")
     let appleSilicon = GitHubReleaseFeed.newestRelease(in: releases, newerThan: current, architecture: "arm64")
     let intel = GitHubReleaseFeed.newestRelease(in: releases, newerThan: current, architecture: "x86_64")
-    #expect(appleSilicon?.1.name == "MatrixClient-2026.8.27.1-macos-universal.dmg")
-    #expect(intel?.1.name == "MatrixClient-2026.8.27.1-macos-universal.dmg")
+    #expect(appleSilicon?.1.name == "MatrixClient-2026.8.27.1-macos-arm64.dmg")
+    #expect(intel?.1.name == "MatrixClient-2026.8.27.1-macos-x86_64.dmg")
 }
 
 @Test

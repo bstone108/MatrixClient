@@ -166,11 +166,11 @@ def self_test() -> None:
     samples = [
         "v2026.8.24.1",
         "MatrixClient-2026.8.24.2-macos-arm64",
-        "MatrixClient-2026.8.24.3-macos-universal",
+        "MatrixClient-2026.8.24.3-macos-x86_64",
         "MatrixClient 2026.8.24.4",
         "MatrixClient-0.1.0-macos-arm64",
         "MatrixClient-ci-macos-arm64",
-        "MatrixClient-ci-macos-universal",
+        "MatrixClient-ci-macos-x86_64",
         "v2026.08.24.9",
         "v2026.8.24.10",
     ]

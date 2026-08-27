@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Fail if shipped Mach-O files are missing required CPU slices.
 
-Release packaging builds one universal .app (arm64 + x86_64). Xcode can
-quietly thin a nested XCFramework (VLCKit, MatrixSDKFFI) down to the host
-arch. This helper walks a bundle, reads each Mach-O header, and refuses a
-"universal" artifact that is actually arm64-only.
+Release packaging builds a separate .app per architecture (arm64 on
+macos-15, x86_64 on macos-15-intel). After assemble, every Mach-O must
+contain that job's slice. A fat nested VLCKit still counts.
 
-Prefer `lipo -archs` when it is on PATH. Fall back to parsing fat/thin
-headers so --self-test works on Linux.
+Production checks prefer `lipo -archs`. Self-test uses header parsing on
+synthetic fixtures and must not feed those fakes to lipo (lipo reports
+only the first slice of a homemade fat file).
 """
 
 from __future__ import annotations
@@ -181,14 +181,21 @@ def archs_from_header(path: Path) -> set[str]:
     return names
 
 
-def architectures_for(path: Path) -> set[str]:
-    from_lipo = archs_from_lipo(path)
-    if from_lipo is not None:
-        return from_lipo
+def architectures_for(path: Path, *, prefer_lipo: bool = True) -> set[str]:
+    if prefer_lipo:
+        from_lipo = archs_from_lipo(path)
+        if from_lipo is not None:
+            return from_lipo
     return archs_from_header(path)
 
 
-def inspect_roots(roots: list[Path], required: list[str], must_include: list[str]) -> int:
+def inspect_roots(
+    roots: list[Path],
+    required: list[str],
+    must_include: list[str],
+    *,
+    prefer_lipo: bool = True,
+) -> int:
     files: list[Path] = []
     for root in roots:
         if not root.exists():
@@ -208,7 +215,7 @@ def inspect_roots(roots: list[Path], required: list[str], must_include: list[str
             if needle in posix:
                 seen_needles[needle] = True
         try:
-            found = architectures_for(path)
+            found = architectures_for(path, prefer_lipo=prefer_lipo)
         except ValueError as exc:
             failures.append(str(exc))
             continue
@@ -226,7 +233,7 @@ def inspect_roots(roots: list[Path], required: list[str], must_include: list[str
         if not present:
             failures.append(
                 f"No Mach-O path containing {needle!r} was found. "
-                "Refusing to call this a universal build without that binary."
+                "Refusing to call this job complete without that binary."
             )
 
     if failures:
@@ -234,9 +241,9 @@ def inspect_roots(roots: list[Path], required: list[str], must_include: list[str
         for line in failures:
             print(f"  {line}", file=sys.stderr)
         print(
-            "Do not ship a universal filename if a nested dependency "
-            "(especially VLCKit) cannot lipo. Dual-arch jobs or arm64-only "
-            "are the honest alternatives.",
+            "Do not ship an arch-specific filename if this job's slice is "
+            "missing. A fat nested VLCKit is OK; a missing arm64 or x86_64 "
+            "slice is not.",
             file=sys.stderr,
         )
         return 1
@@ -270,7 +277,7 @@ def self_test() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         thin = root / "thin-arm64"
-        fat = root / "universal"
+        fat = root / "fat"
         intel_only = root / "thin-x86"
         nested = root / "VLCKit.framework" / "VLCKit"
         nested.parent.mkdir(parents=True)
@@ -279,41 +286,23 @@ def self_test() -> None:
         _write_thin(intel_only, CPU_TYPE_X86_64)
         _write_fat(nested, [CPU_TYPE_ARM64, CPU_TYPE_X86_64])
 
-        assert architectures_for(thin) == {"arm64"}, architectures_for(thin)
-        assert architectures_for(fat) == {"arm64", "x86_64"}, architectures_for(fat)
-        assert architectures_for(intel_only) == {"x86_64"}
+        # Synthetic fixtures are not real Apple fat files. Never give them to
+        # lipo; it can report only arm64 for a homemade fat header.
+        assert archs_from_header(thin) == {"arm64"}, archs_from_header(thin)
+        assert archs_from_header(fat) == {"arm64", "x86_64"}, archs_from_header(fat)
+        assert archs_from_header(intel_only) == {"x86_64"}
+        assert architectures_for(fat, prefer_lipo=False) == {"arm64", "x86_64"}
 
-        required = parse_required(["arm64,x86_64"])
         sink = io.StringIO()
         with redirect_stdout(sink), redirect_stderr(sink):
-            assert inspect_roots([fat, nested.parent], required, ["VLCKit"]) == 0
-            assert inspect_roots([thin], required, []) == 1
-            assert inspect_roots([intel_only], required, []) == 1
-            assert inspect_roots([fat], required, ["VLCKit"]) == 1
-
-        script = str(Path(__file__).resolve())
-        passed = subprocess.run(
-            [
-                sys.executable,
-                script,
-                "--require",
-                "arm64,x86_64",
-                "--must-include",
-                "VLCKit",
-                str(nested.parent),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert passed.returncode == 0, passed.stdout + passed.stderr
-
-        failed = subprocess.run(
-            [sys.executable, script, "--require", "arm64,x86_64", str(thin)],
-            capture_output=True,
-            text=True,
-        )
-        assert failed.returncode != 0, failed.stdout + failed.stderr
-        assert "missing x86_64" in failed.stderr, failed.stderr
+            assert inspect_roots([nested.parent], ["arm64"], ["VLCKit"], prefer_lipo=False) == 0
+            assert inspect_roots([nested.parent], ["x86_64"], ["VLCKit"], prefer_lipo=False) == 0
+            assert inspect_roots([thin], ["arm64"], [], prefer_lipo=False) == 0
+            assert inspect_roots([thin], ["x86_64"], [], prefer_lipo=False) == 1
+            assert inspect_roots([intel_only], ["x86_64"], [], prefer_lipo=False) == 0
+            assert inspect_roots([intel_only], ["arm64"], [], prefer_lipo=False) == 1
+            assert inspect_roots([fat], ["arm64", "x86_64"], [], prefer_lipo=False) == 0
+            assert inspect_roots([fat], ["arm64"], ["VLCKit"], prefer_lipo=False) == 1
 
     print("self-test passed")
 
@@ -323,7 +312,7 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument(
         "--require",
-        default="arm64,x86_64",
+        default=None,
         help="Comma/space-separated architectures every Mach-O must contain.",
     )
     parser.add_argument(
@@ -341,6 +330,8 @@ def main() -> int:
 
     if not args.paths:
         parser.error("the following arguments are required: paths")
+    if not args.require:
+        parser.error("--require is required (the job's architecture, e.g. arm64)")
     required = parse_required([args.require])
     return inspect_roots(args.paths, required, args.must_include)
 

@@ -24,6 +24,7 @@ jobs:
       compile: ${{ steps.decide.outputs.compile }}
       package: ${{ steps.decide.outputs.package }}
       release: ${{ steps.decide.outputs.release }}
+      app_version: ${{ steps.version.outputs.app_version }}
     steps:
       - name: Classify pull request vs real release
         id: decide
@@ -67,13 +68,47 @@ jobs:
           echo "package=0" >> "${GITHUB_OUTPUT}"
           echo "release=0" >> "${GITHUB_OUTPUT}"
 
+      - name: Check out repository
+        if: steps.decide.outputs.package == '1'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Assign shared date.build version
+        id: version
+        if: steps.decide.outputs.package == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 scripts/next-date-build-version.py --self-test
+          if [[ "${EVENT_NAME}" == "push" && "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="$(python3 scripts/next-date-build-version.py --from-tag "${REF_NAME}")"
+          else
+            version="$(python3 scripts/next-date-build-version.py)"
+          fi
+          echo "app_version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "Both arch jobs will stamp ${version}"
+
   compile-macos:
-    name: Compile Release
+    name: Compile Release (${{ matrix.arch }})
     needs: gate
     if: needs.gate.outputs.compile == '1'
-    # One macos-15 job: ARCHS="arm64 x86_64" ONLY_ACTIVE_ARCH=NO. vlckit-spm
-    # 3.6.0 ships macos-arm64_x86_64, so this is a real universal .app.
-    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      MATRIXCLIENT_ARCH: ${{ matrix.arch }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -87,17 +122,22 @@ jobs:
       - name: Install xcodegen
         run: brew install xcodegen
 
-      - name: Compile unsigned universal Release
+      - name: Compile unsigned ${{ matrix.arch }} Release
         run: ./scripts/package-macos.sh --compile-only
 
   package-macos:
-    name: Sign, notarize, and staple
+    name: Sign, notarize, and staple (${{ matrix.arch }})
     needs: gate
     if: needs.gate.outputs.package == '1'
-    runs-on: macos-15
-    outputs:
-      app_version: ${{ steps.package.outputs.app_version }}
-      arch: ${{ steps.package.outputs.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -131,18 +171,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           MATRIXCLIENT_RELEASE: ${{ needs.gate.outputs.release }}
-          MATRIXCLIENT_VERSION: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
+          MATRIXCLIENT_VERSION: ${{ needs.gate.outputs.app_version }}
+          MATRIXCLIENT_ARCH: ${{ matrix.arch }}
           MATRIXCLIENT_VERSION_DEBUG: "1"
         run: ./scripts/package-macos.sh
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}
+          name: MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ matrix.arch }}
           path: |
-            build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}.zip
-            build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ steps.package.outputs.arch }}.dmg
-            build/SHA256SUMS
+            build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ matrix.arch }}.zip
+            build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ matrix.arch }}.dmg
+            build/SHA256SUMS-macos-${{ matrix.arch }}
           if-no-files-found: error
 
       - name: Delete signing keychain
@@ -166,14 +207,15 @@ jobs:
       - name: Download macOS artifacts
         uses: actions/download-artifact@v5
         with:
-          name: MatrixClient-${{ needs.package-macos.outputs.app_version }}-macos-${{ needs.package-macos.outputs.arch }}
-          path: release-artifacts/macos
+          pattern: MatrixClient-${{ needs.gate.outputs.app_version }}-macos-*
+          path: release-artifacts
+          merge-multiple: false
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          APP_VERSION: ${{ needs.package-macos.outputs.app_version }}
+          APP_VERSION: ${{ needs.gate.outputs.app_version }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
@@ -183,8 +225,13 @@ jobs:
           fi
           tag="v${APP_VERSION}"
           title="MatrixClient ${APP_VERSION}"
-          notes="Developer ID-signed, notarized, and stapled universal macOS build (Apple Silicon and Intel) for ${APP_VERSION}."
+          notes="Developer ID-signed, notarized, and stapled macOS builds (Apple Silicon arm64 and Intel x86_64) for ${APP_VERSION}."
           mapfile -d '' assets < <(find release-artifacts -type f -print0)
+          if [[ "${#assets[@]}" -lt 4 ]]; then
+            echo "Expected arm64 and x86_64 zip/dmg assets; found:" >&2
+            find release-artifacts -type f >&2 || true
+            exit 1
+          fi
           if gh release view "${tag}" --repo "${GH_REPO}" >/dev/null 2>&1; then
             echo "Release ${tag} already exists; refusing to clobber." >&2
             exit 1

@@ -5,11 +5,10 @@ set -euo pipefail
 # (xcodegen + xcodebuild, then copy nested frameworks), then Developer ID-sign,
 # notarize, and staple both the .app and a .dmg.
 #
-# Architectures: one universal .app (arm64 + x86_64) on a single macos-15
-# job. vlckit-spm 3.6.0 and MatrixRustSDK ship macos-arm64_x86_64 slices, so
-# this is a real lipo, not two files glued together. After assemble, every
-# Mach-O (including nested VLCKit) must contain both slices or the script
-# exits. Do not rename a thin binary "universal".
+# Architectures: separate arm64 and x86_64 apps, not one universal binary.
+# CI runs macos-15 (ARCHS=arm64) and macos-15-intel (ARCHS=x86_64). After
+# assemble, every Mach-O must contain that job's slice (a fat VLCKit still
+# counts). Do not pass both arches in one job.
 #
 # Flags:
 #   --compile-only  unsigned Release compile + assemble + slice check.
@@ -43,8 +42,7 @@ set -euo pipefail
 #   MACOS_REQUIRE_NOTARIZATION=1  force notarization even outside Actions
 #   MACOS_NOTARY_TIMEOUT          notarytool --timeout (default 45m)
 #   MATRIXCLIENT_CI_VERSION_LABEL artifact label for non-release runs (ci)
-#   MATRIXCLIENT_ARCHS            default: "arm64 x86_64"
-#   MATRIXCLIENT_ARCH_LABEL       artifact suffix (default: universal)
+#   MATRIXCLIENT_ARCH             arm64 or x86_64 (default: uname -m)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -108,14 +106,16 @@ if [[ "$(uname -s)" != "Darwin" ]]; then
   exit 1
 fi
 
-# One universal .app. macos-15 is Apple Silicon; ONLY_ACTIVE_ARCH=NO still
-# compiles the Intel slice because the XCFrameworks already contain it.
-MACOS_ARCHS="${MATRIXCLIENT_ARCHS:-arm64 x86_64}"
-if [[ "${MACOS_ARCHS}" == *" "* ]]; then
-  ARCH_LABEL="${MATRIXCLIENT_ARCH_LABEL:-universal}"
-else
-  ARCH_LABEL="${MATRIXCLIENT_ARCH_LABEL:-${MACOS_ARCHS}}"
+MACOS_ARCH="${MATRIXCLIENT_ARCH:-${MATRIXCLIENT_ARCHS:-$(uname -m)}}"
+if [[ "${MACOS_ARCH}" == *" "* || "${MACOS_ARCH}" == *","* || "${MACOS_ARCH}" == *universal* ]]; then
+  echo "Refusing ARCHS=${MACOS_ARCH}. Ship separate arm64 and x86_64 jobs, not a universal binary." >&2
+  exit 1
 fi
+if [[ "${MACOS_ARCH}" != "arm64" && "${MACOS_ARCH}" != "x86_64" ]]; then
+  echo "Unsupported MATRIXCLIENT_ARCH=${MACOS_ARCH} (expected arm64 or x86_64)." >&2
+  exit 1
+fi
+ARCH_LABEL="${MACOS_ARCH}"
 CODESIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-}"
 NOTARY_TIMEOUT="${MACOS_NOTARY_TIMEOUT:-45m}"
 
@@ -543,8 +543,8 @@ xcodebuild \
   -configuration Release \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
   "CONFIGURATION_BUILD_DIR=${STAGING_BUILD_DIR}" \
-  ARCHS="${MACOS_ARCHS}" \
-  ONLY_ACTIVE_ARCH=NO \
+  ARCHS="${MACOS_ARCH}" \
+  ONLY_ACTIVE_ARCH=YES \
   EXCLUDED_ARCHS= \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
@@ -565,16 +565,16 @@ if [[ ! -f "${STAGED_APP}/Contents/MacOS/${APP_NAME}" ]]; then
   exit 1
 fi
 
-# Refuse a universal artifact name if Xcode thinned VLCKit (or anything else).
+# This job's slice must be present. A fat nested VLCKit still counts.
 python3 "${SLICE_HELPER}" \
-  --require "${MACOS_ARCHS}" \
+  --require "${MACOS_ARCH}" \
   --must-include "Contents/MacOS/${APP_NAME}" \
   --must-include "VLCKit.framework" \
   "${STAGED_APP}"
 
 if [[ "${COMPILE_ONLY}" -eq 1 ]]; then
   echo "Compile-only: unsigned ${ARCH_LABEL} app staged at ${STAGED_APP}"
-  echo "ARCHS=${MACOS_ARCHS} ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO"
+  echo "ARCHS=${MACOS_ARCH} ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO"
   echo "Skipping Developer ID import, notarytool, stapler, zip, and dmg."
   exit 0
 fi
@@ -616,7 +616,7 @@ ditto "${STAGED_APP}" "${DELIVERABLE_DIR}/${APP_NAME}.app"
   shasum -a 256 \
     "$(basename "${ARCHIVE_PATH}")" \
     "$(basename "${DMG_PATH}")"
-} > "${DELIVERABLE_DIR}/SHA256SUMS"
+} > "${DELIVERABLE_DIR}/SHA256SUMS-macos-${ARCH_LABEL}"
 
 echo "Created ${ARCHIVE_PATH}"
 echo "Created ${DMG_PATH}"
