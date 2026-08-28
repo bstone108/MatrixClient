@@ -45,6 +45,7 @@ final class GitHubReleaseUpdater {
         static let lastCheckAt = "Updater.lastCheckAt"
         static let applyOnNextLaunch = "Updater.applyOnNextLaunch"
         static let stagedVersion = "Updater.stagedVersion"
+        static let lastPromptedVersion = "Updater.lastPromptedVersion"
     }
 
     private static let checkInterval: TimeInterval = 60 * 60 * 48
@@ -57,11 +58,15 @@ final class GitHubReleaseUpdater {
     private var observers: [UUID: @MainActor () -> Void] = [:]
     private var started = false
     private var checkTask: Task<Void, Never>?
+    private var isPresentingRestartPrompt = false
 
     private(set) var status: Status = .idle {
         didSet {
             guard status != oldValue else { return }
             notifyObservers()
+            if case .ready = status {
+                presentRestartPromptIfNeeded()
+            }
         }
     }
 
@@ -113,6 +118,44 @@ final class GitHubReleaseUpdater {
 
     func relaunchIfReady() {
         applyStagedUpdateAndRelaunch()
+    }
+
+    /// Show Restart now / Later once per staged version. Toolbar refresh and
+    /// later 48h checks that land on the same `.ready(version)` must not nag.
+    private func presentRestartPromptIfNeeded() {
+        guard case let .ready(version) = status else { return }
+        guard defaults.string(forKey: DefaultsKey.lastPromptedVersion) != version else { return }
+        guard !isPresentingRestartPrompt else { return }
+        isPresentingRestartPrompt = true
+        Task { [weak self] in
+            self?.showRestartPrompt(for: version)
+        }
+    }
+
+    private func showRestartPrompt(for version: String) {
+        guard case let .ready(current) = status, current == version else {
+            isPresentingRestartPrompt = false
+            return
+        }
+        guard defaults.string(forKey: DefaultsKey.lastPromptedVersion) != version else {
+            isPresentingRestartPrompt = false
+            return
+        }
+
+        defaults.set(version, forKey: DefaultsKey.lastPromptedVersion)
+
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = "Update Ready"
+        alert.informativeText = "Matrix Client \(version) is ready to install."
+        alert.addButton(withTitle: "Restart now")
+        alert.addButton(withTitle: "Later")
+
+        let response = alert.runModal()
+        isPresentingRestartPrompt = false
+        if response == .alertFirstButtonReturn {
+            relaunchIfReady()
+        }
     }
 
     private func shouldCheckAutomatically() -> Bool {
