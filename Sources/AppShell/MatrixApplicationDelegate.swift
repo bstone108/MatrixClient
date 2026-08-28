@@ -1,4 +1,6 @@
 import AppKit
+import MatrixCore
+import Sparkle
 import TimelineUI
 
 @MainActor
@@ -7,7 +9,7 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
     private var stateController: WorkspaceStateController?
     private var mainWindowController: MainWindowController?
     private var notificationController: NotificationController?
-    private var updater: GitHubReleaseUpdater?
+    private var updaterController: SPUStandardUpdaterController?
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         do {
@@ -28,21 +30,20 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
             )
             self.notificationController = notificationController
 
-            let updater = GitHubReleaseUpdater(
-                diagnostics: environment.diagnostics,
-                applicationSupportURL: environment.database.paths.applicationSupportURL
-            )
-            self.updater = updater
-
             let controller = MainWindowController(
                 state: stateController,
-                videoPlaybackEngine: environment.videoPlaybackEngine,
-                updater: updater
+                videoPlaybackEngine: environment.videoPlaybackEngine
             )
             mainWindowController = controller
 
+            let updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: self,
+                userDriverDelegate: nil
+            )
+            self.updaterController = updaterController
+
             buildMenu()
-            updater.start()
             controller.showAndFocusWindow()
             NSApp.activate(ignoringOtherApps: true)
             notificationController.start()
@@ -78,7 +79,7 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
 
     @objc
     private func checkForUpdates(_ sender: Any?) {
-        updater?.checkForUpdates(force: true)
+        updaterController?.checkForUpdates(sender)
     }
 
     @objc
@@ -138,5 +139,11 @@ public final class MatrixApplicationDelegate: NSObject, NSApplicationDelegate {
         NSApp.windowsMenu = windowMenu
 
         NSApp.mainMenu = mainMenu
+    }
+}
+
+extension MatrixApplicationDelegate: SPUUpdaterDelegate {
+    nonisolated public func feedURLString(for updater: SPUUpdater) -> String? {
+        GitHubReleaseFeed.appcastURL(architecture: GitHubReleaseFeed.currentArchitecture())?.absoluteString
     }
 }

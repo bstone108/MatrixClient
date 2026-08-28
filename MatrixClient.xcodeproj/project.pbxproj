@@ -55,6 +55,9 @@
 		98BC268CE43EEE0EDD09DBA1 /* QueuedMessageRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18B804FE484B042EA600BBC4 /* QueuedMessageRepository.swift */; };
 		98C9C1E60BD6ABAA33525690 /* PersistedTimelineRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 881785589AB98D28509F8D58 /* PersistedTimelineRepositoryTests.swift */; };
 		A2B6C98BF22CF87E4B7C50B3 /* VLCKitSPM in Frameworks */ = {isa = PBXBuildFile; productRef = 5450F49E124291D4EF16F4D0 /* VLCKitSPM */; };
+		A44444444444444444444413 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A44444444444444444444411 /* Sparkle */; };
+		A44444444444444444444414 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A44444444444444444444412 /* Sparkle */; };
+		A44444444444444444444415 /* Sparkle in Embed Frameworks */ = {isa = PBXBuildFile; productRef = A44444444444444444444412 /* Sparkle */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		A3938EAA298B76BDF48DEC42 /* PersistedRoomSummaryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D4A2567C76418A352201302 /* PersistedRoomSummaryRepository.swift */; };
 		AA998F6F95B77FCF48E99B30 /* AppShell.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */; };
 		B1A5708C81B6F71EFAC97573 /* QueuedMessageRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB38A79F3BBDA97B951F6412 /* QueuedMessageRepositoryTests.swift */; };
@@ -76,7 +79,6 @@
 		C33333333333333333333312 /* GitHubReleaseFeed.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333302 /* GitHubReleaseFeed.swift */; };
 		C33333333333333333333313 /* TimelinePaginationPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333303 /* TimelinePaginationPolicy.swift */; };
 		C33333333333333333333314 /* RoomNotificationMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333304 /* RoomNotificationMode.swift */; };
-		C33333333333333333333315 /* GitHubReleaseUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333305 /* GitHubReleaseUpdater.swift */; };
 		C33333333333333333333316 /* DateBuildVersionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333306 /* DateBuildVersionTests.swift */; };
 		C33333333333333333333317 /* GitHubReleaseFeedTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333307 /* GitHubReleaseFeedTests.swift */; };
 		C33333333333333333333318 /* TimelinePaginationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333308 /* TimelinePaginationPolicyTests.swift */; };
@@ -249,6 +251,7 @@
 			dstSubfolderSpec = 10;
 			files = (
 				D2E138EE48D975D55A520384 /* AppShell.framework in Embed Frameworks */,
+				A44444444444444444444415 /* Sparkle in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -323,7 +326,6 @@
 		C33333333333333333333302 /* GitHubReleaseFeed.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubReleaseFeed.swift; sourceTree = "<group>"; };
 		C33333333333333333333303 /* TimelinePaginationPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelinePaginationPolicy.swift; sourceTree = "<group>"; };
 		C33333333333333333333304 /* RoomNotificationMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomNotificationMode.swift; sourceTree = "<group>"; };
-		C33333333333333333333305 /* GitHubReleaseUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubReleaseUpdater.swift; sourceTree = "<group>"; };
 		C33333333333333333333306 /* DateBuildVersionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateBuildVersionTests.swift; sourceTree = "<group>"; };
 		C33333333333333333333307 /* GitHubReleaseFeedTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GitHubReleaseFeedTests.swift; sourceTree = "<group>"; };
 		C33333333333333333333308 /* TimelinePaginationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelinePaginationPolicyTests.swift; sourceTree = "<group>"; };
@@ -377,6 +379,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AA998F6F95B77FCF48E99B30 /* AppShell.framework in Frameworks */,
+				A44444444444444444444414 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -436,6 +439,7 @@
 				B8022498FD0FA60050DB1F1F /* MediaKit.framework in Frameworks */,
 				60A31F2ADAE45FBB85423FBA /* Persistence.framework in Frameworks */,
 				D7E95FA6C6774733AD1ACF76 /* Diagnostics.framework in Frameworks */,
+				A44444444444444444444413 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -611,7 +615,6 @@
 				903044045DB8284FCED08DC5 /* LoginViewController.swift */,
 				ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */,
 				C86FEB588F4B1D1DBB0DAB40 /* MatrixApplicationDelegate.swift */,
-				C33333333333333333333305 /* GitHubReleaseUpdater.swift */,
 				8BE2F7BA626C5FBE62057A29 /* NotificationController.swift */,
 				B759BF06CDD903FC5A6D0EAE /* NotificationPreferences.swift */,
 				9C1341F46C65038F5CE773AB /* NotificationSettingsViewController.swift */,
@@ -724,6 +727,7 @@
 			);
 			name = AppShell;
 			packageProductDependencies = (
+				A44444444444444444444411 /* Sparkle */,
 			);
 			productName = AppShell;
 			productReference = 29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */;
@@ -807,6 +811,7 @@
 			);
 			name = MatrixClient;
 			packageProductDependencies = (
+				A44444444444444444444412 /* Sparkle */,
 			);
 			productName = MatrixClient;
 			productReference = F2812A99A962CA56DCB10869 /* MatrixClient.app */;
@@ -879,6 +884,7 @@
 				6F1D92A4E95911CE3C29090A /* XCRemoteSwiftPackageReference "GRDB.swift" */,
 				53538C4C103D726E81B62496 /* XCRemoteSwiftPackageReference "matrix-rust-components-swift" */,
 				83D46BB151F383DA1FC5815E /* XCRemoteSwiftPackageReference "vlckit-spm" */,
+				A44444444444444444444410 /* XCRemoteSwiftPackageReference "Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = B3660D4A40C47A7EB59997EC /* Products */;
@@ -952,7 +958,6 @@
 				CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */,
 				E6A85A2F5E82E2F1519F6EC8 /* MainWindowController.swift in Sources */,
 				2385CBBDCA5CC2359C04778D /* MatrixApplicationDelegate.swift in Sources */,
-				C33333333333333333333315 /* GitHubReleaseUpdater.swift in Sources */,
 				DFADC1951A7DFFB0B5FF4A43 /* NotificationController.swift in Sources */,
 				42C12B6BBE78B0215C6ED516 /* NotificationPreferences.swift in Sources */,
 				425DDBD8DCE83C83E0ACFBC4 /* NotificationSettingsViewController.swift in Sources */,
@@ -1827,6 +1832,14 @@
 				version = 3.6.0;
 			};
 		};
+		A44444444444444444444410 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle.git";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.6;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -1844,6 +1857,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 6F1D92A4E95911CE3C29090A /* XCRemoteSwiftPackageReference "GRDB.swift" */;
 			productName = GRDB;
+		};
+		A44444444444444444444411 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A44444444444444444444410 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+		A44444444444444444444412 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A44444444444444444444410 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

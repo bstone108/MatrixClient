@@ -43,12 +43,19 @@ set -euo pipefail
 #   MACOS_NOTARY_TIMEOUT          notarytool --timeout (default 45m)
 #   MATRIXCLIENT_CI_VERSION_LABEL artifact label for non-release runs (ci)
 #   MATRIXCLIENT_ARCH             arm64 or x86_64 (default: uname -m)
+#
+# Sparkle (real releases only; never --compile-only):
+#   SPARKLE_PRIVATE_ED_KEY        EdDSA private key. Pipe to sign_update; never
+#                                 log or write into git. Public key lives in
+#                                 Info.plist as SUPublicEDKey.
+#   Produces appcast-${arch}.xml for that job's notarized macos-${arch}.dmg.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VERSION_HELPER="${SCRIPT_DIR}/next-date-build-version.py"
 VLCKIT_LOAD_HELPER="${SCRIPT_DIR}/verify-mediakit-vlckit-load.py"
 SLICE_HELPER="${SCRIPT_DIR}/verify-macos-slices.py"
+SPARKLE_APPCAST_HELPER="${SCRIPT_DIR}/sparkle-appcast.py"
 PROJECT_PATH="${ROOT_DIR}/MatrixClient.xcodeproj"
 COMPILE_ONLY=0
 ENTITLEMENTS_FILE="${ROOT_DIR}/Config/MatrixClient.entitlements"
@@ -530,6 +537,74 @@ stamp_release_versions_on_app() {
     exit 1
   fi
   echo "Stamped ${plist} CFBundleShortVersionString=${short_version} CFBundleVersion=${bundle_version}"
+
+  local repo_path="${GH_REPO:-bstone108/MatrixClient}"
+  local feed_url="https://github.com/${repo_path}/releases/latest/download/appcast-${ARCH_LABEL}.xml"
+  if /usr/libexec/PlistBuddy -c 'Print :SUFeedURL' "${plist}" >/dev/null 2>&1; then
+    /usr/libexec/PlistBuddy -c "Set :SUFeedURL ${feed_url}" "${plist}"
+  else
+    /usr/libexec/PlistBuddy -c "Add :SUFeedURL string ${feed_url}" "${plist}"
+  fi
+  echo "Stamped ${plist} SUFeedURL=${feed_url}"
+}
+
+write_sparkle_appcast() {
+  local dmg_path="$1"
+  local appcast_path="${DELIVERABLE_DIR}/appcast-${ARCH_LABEL}.xml"
+  local repo_path="${GH_REPO:-bstone108/MatrixClient}"
+  local tools_version="${SPARKLE_TOOLS_VERSION:-2.9.6}"
+  local tools_dir="${WORK_DIR}/sparkle-tools"
+  local archive="${tools_dir}/Sparkle-${tools_version}.tar.xz"
+  local sign_update=""
+
+  if ! is_release_packaging; then
+    return 0
+  fi
+  if [[ ! -f "${dmg_path}" ]]; then
+    echo "Sparkle appcast DMG not found: ${dmg_path}" >&2
+    exit 1
+  fi
+  if [[ -z "${SPARKLE_PRIVATE_ED_KEY:-}" ]]; then
+    echo "SPARKLE_PRIVATE_ED_KEY is required to sign the Sparkle appcast for a real release." >&2
+    exit 1
+  fi
+  if [[ ! -f "${SPARKLE_APPCAST_HELPER}" ]]; then
+    echo "Sparkle appcast helper not found: ${SPARKLE_APPCAST_HELPER}" >&2
+    exit 1
+  fi
+
+  mkdir -p "${tools_dir}"
+  if [[ ! -f "${archive}" ]]; then
+    curl -fsSL -o "${archive}" \
+      "https://github.com/sparkle-project/Sparkle/releases/download/${tools_version}/Sparkle-${tools_version}.tar.xz"
+  fi
+  tar -xJf "${archive}" -C "${tools_dir}"
+  sign_update="$(find "${tools_dir}" -name sign_update -type f -print -quit)"
+  if [[ -z "${sign_update}" ]]; then
+    echo "Sparkle sign_update not found in ${tools_dir}" >&2
+    find "${tools_dir}" -maxdepth 3 -type f >&2 || true
+    exit 1
+  fi
+  chmod u+x "${sign_update}"
+
+  # Never xtrace the private key. Pipe it only to sign_update stdin.
+  set +x
+  printf '%s\n' "${SPARKLE_PRIVATE_ED_KEY}" | "${sign_update}" --ed-key-file - "${dmg_path}" | \
+    python3 "${SPARKLE_APPCAST_HELPER}" \
+      --version "${APP_VERSION}" \
+      --architecture "${ARCH_LABEL}" \
+      --repo "${repo_path}" \
+      --sign-update-output-stdin \
+      --output "${appcast_path}"
+  if ! grep -F "MatrixClient-${APP_VERSION}-macos-${ARCH_LABEL}.dmg" "${appcast_path}" >/dev/null; then
+    echo "Sparkle appcast is missing the dedicated ${ARCH_LABEL} disk image URL." >&2
+    exit 1
+  fi
+  if grep -Fi "universal" "${appcast_path}" >/dev/null; then
+    echo "Sparkle appcast must not mention a universal disk image." >&2
+    exit 1
+  fi
+  echo "Wrote Sparkle appcast ${appcast_path}"
 }
 
 rm_rf "${WORK_DIR}" "${DERIVED_DATA_PATH}" "${STAGING_BUILD_DIR}"
@@ -570,6 +645,7 @@ python3 "${SLICE_HELPER}" \
   --require "${MACOS_ARCH}" \
   --must-include "Contents/MacOS/${APP_NAME}" \
   --must-include "VLCKit.framework" \
+  --must-include "Sparkle.framework" \
   "${STAGED_APP}"
 
 if [[ "${COMPILE_ONLY}" -eq 1 ]]; then
@@ -611,11 +687,19 @@ fi
 
 ditto "${STAGED_APP}" "${DELIVERABLE_DIR}/${APP_NAME}.app"
 
+# Sign the stapled DMG so the GitHub Release enclosure matches what users download.
+write_sparkle_appcast "${DMG_PATH}"
+
 {
   cd "${DELIVERABLE_DIR}"
-  shasum -a 256 \
-    "$(basename "${ARCHIVE_PATH}")" \
+  sums=(
+    "$(basename "${ARCHIVE_PATH}")"
     "$(basename "${DMG_PATH}")"
+  )
+  if [[ -f "appcast-${ARCH_LABEL}.xml" ]]; then
+    sums+=("appcast-${ARCH_LABEL}.xml")
+  fi
+  shasum -a 256 "${sums[@]}"
 } > "${DELIVERABLE_DIR}/SHA256SUMS-macos-${ARCH_LABEL}"
 
 echo "Created ${ARCHIVE_PATH}"
