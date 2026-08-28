@@ -166,14 +166,16 @@ def self_test() -> None:
     samples = [
         "v2026.8.24.1",
         "MatrixClient-2026.8.24.2-macos-arm64",
+        "MatrixClient-2026.8.24.3-macos-x86_64",
         "MatrixClient 2026.8.24.4",
         "MatrixClient-0.1.0-macos-arm64",
         "MatrixClient-ci-macos-arm64",
+        "MatrixClient-ci-macos-x86_64",
         "v2026.08.24.9",
         "v2026.8.24.10",
     ]
     numbers = extract_build_numbers(prefix, samples)
-    assert numbers == {1, 2, 4, 10}, numbers
+    assert numbers == {1, 2, 3, 4, 10}, numbers
     assert next_version(prefix, numbers) == "2026.8.24.11"
     assert next_version(prefix, set()) == "2026.8.24.1"
     assert parse_date_build_version("v2026.8.24.1") == "2026.8.24.1"

@@ -5,10 +5,21 @@ set -euo pipefail
 # (xcodegen + xcodebuild, then copy nested frameworks), then Developer ID-sign,
 # notarize, and staple both the .app and a .dmg.
 #
+# Architectures: separate arm64 and x86_64 apps, not one universal binary.
+# CI runs macos-15 (ARCHS=arm64) and macos-15-intel (ARCHS=x86_64). After
+# assemble, every Mach-O must contain that job's slice (a fat VLCKit still
+# counts). Do not pass both arches in one job.
+#
+# Flags:
+#   --compile-only  unsigned Release compile + assemble + slice check.
+#                   Used by pull-request CI. Does not import a cert, call
+#                   notarytool, staple, consume a date.build N, or emit zip/dmg.
+#   --print-version resolve the artifact version label and exit.
+#
 # Required for a signed release:
 #   MACOS_CODESIGN_IDENTITY  (never "-" / ad-hoc)
 #
-# Required for notarization (always on GitHub Actions):
+# Required for notarization (signed releases only; never on --compile-only):
 #   APPLE_ID
 #   APPLE_APP_SPECIFIC_PASSWORD
 #   APPLE_TEAM_ID
@@ -22,16 +33,24 @@ set -euo pipefail
 #   They keep the committed Info.plist template (0.1.0 / 1) inside the bundle
 #   and name artifacts with a non-release label (default: ci).
 #
+# Zip / notary (Apple cannot staple a zip):
+#   ditto -c -k --keepParent the .app, notarytool submit that zip, stapler
+#   staple the .app, THEN ship that stapled .app as the release zip. Codesign,
+#   notarize, and staple the .dmg as well. The notary zip is disposable.
+#
 # Optional:
 #   MACOS_REQUIRE_NOTARIZATION=1  force notarization even outside Actions
 #   MACOS_NOTARY_TIMEOUT          notarytool --timeout (default 45m)
 #   MATRIXCLIENT_CI_VERSION_LABEL artifact label for non-release runs (ci)
+#   MATRIXCLIENT_ARCH             arm64 or x86_64 (default: uname -m)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 VERSION_HELPER="${SCRIPT_DIR}/next-date-build-version.py"
 VLCKIT_LOAD_HELPER="${SCRIPT_DIR}/verify-mediakit-vlckit-load.py"
+SLICE_HELPER="${SCRIPT_DIR}/verify-macos-slices.py"
 PROJECT_PATH="${ROOT_DIR}/MatrixClient.xcodeproj"
+COMPILE_ONLY=0
 ENTITLEMENTS_FILE="${ROOT_DIR}/Config/MatrixClient.entitlements"
 INFO_PLIST="${ROOT_DIR}/Config/MatrixClient-Info.plist"
 APP_NAME="MatrixClient"
@@ -78,12 +97,25 @@ if [[ "${1:-}" == "--print-version" ]]; then
   exit 0
 fi
 
+if [[ "${1:-}" == "--compile-only" ]]; then
+  COMPILE_ONLY=1
+fi
+
 if [[ "$(uname -s)" != "Darwin" ]]; then
   echo "This packaging script must be run on macOS (except --print-version)." >&2
   exit 1
 fi
 
-ARCH="$(uname -m)"
+MACOS_ARCH="${MATRIXCLIENT_ARCH:-${MATRIXCLIENT_ARCHS:-$(uname -m)}}"
+if [[ "${MACOS_ARCH}" == *" "* || "${MACOS_ARCH}" == *","* || "${MACOS_ARCH}" == *universal* ]]; then
+  echo "Refusing ARCHS=${MACOS_ARCH}. Ship separate arm64 and x86_64 jobs, not a universal binary." >&2
+  exit 1
+fi
+if [[ "${MACOS_ARCH}" != "arm64" && "${MACOS_ARCH}" != "x86_64" ]]; then
+  echo "Unsupported MATRIXCLIENT_ARCH=${MACOS_ARCH} (expected arm64 or x86_64)." >&2
+  exit 1
+fi
+ARCH_LABEL="${MACOS_ARCH}"
 CODESIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-}"
 NOTARY_TIMEOUT="${MACOS_NOTARY_TIMEOUT:-45m}"
 
@@ -116,6 +148,16 @@ if [[ ! -f "${VLCKIT_LOAD_HELPER}" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${SLICE_HELPER}" ]]; then
+  echo "Architecture slice helper not found: ${SLICE_HELPER}" >&2
+  exit 1
+fi
+
+if [[ "${COMPILE_ONLY}" -eq 1 ]] && is_release_packaging; then
+  echo "Refusing --compile-only together with MATRIXCLIENT_RELEASE=1 (that would consume a date.build)." >&2
+  exit 1
+fi
+
 resolve_packaging_version
 
 using_developer_id() {
@@ -123,32 +165,37 @@ using_developer_id() {
 }
 
 notarization_requested() {
+  if [[ "${COMPILE_ONLY}" -eq 1 ]]; then
+    return 1
+  fi
   if [[ "${MACOS_REQUIRE_NOTARIZATION:-0}" == "1" || -n "${GITHUB_ACTIONS:-}" ]]; then
     return 0
   fi
   [[ -n "${APPLE_ID:-}" && -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" && -n "${APPLE_TEAM_ID:-}" ]]
 }
 
-if ! using_developer_id; then
-  echo "MACOS_CODESIGN_IDENTITY must be a Developer ID identity; ad-hoc codesign --sign - is not allowed for release artifacts." >&2
-  exit 1
-fi
+if [[ "${COMPILE_ONLY}" -eq 0 ]]; then
+  if ! using_developer_id; then
+    echo "MACOS_CODESIGN_IDENTITY must be a Developer ID identity; ad-hoc codesign --sign - is not allowed for release artifacts." >&2
+    exit 1
+  fi
 
-if [[ ! -f "${ENTITLEMENTS_FILE}" ]]; then
-  echo "Entitlements file not found: ${ENTITLEMENTS_FILE}" >&2
-  exit 1
-fi
+  if [[ ! -f "${ENTITLEMENTS_FILE}" ]]; then
+    echo "Entitlements file not found: ${ENTITLEMENTS_FILE}" >&2
+    exit 1
+  fi
 
-if notarization_requested; then
-  : "${APPLE_ID:?APPLE_ID is required for notarization}"
-  : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required for notarization}"
-  : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
-fi
+  if notarization_requested; then
+    : "${APPLE_ID:?APPLE_ID is required for notarization}"
+    : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD is required for notarization}"
+    : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for notarization}"
+  fi
 
-if ! security find-identity -v -p codesigning | grep -F "${CODESIGN_IDENTITY}" >/dev/null; then
-  echo "Signing identity not found in keychain: ${CODESIGN_IDENTITY}" >&2
-  security find-identity -v -p codesigning >&2 || true
-  exit 1
+  if ! security find-identity -v -p codesigning | grep -F "${CODESIGN_IDENTITY}" >/dev/null; then
+    echo "Signing identity not found in keychain: ${CODESIGN_IDENTITY}" >&2
+    security find-identity -v -p codesigning >&2 || true
+    exit 1
+  fi
 fi
 
 rm_rf() {
@@ -439,7 +486,7 @@ rewrite_mediakit_vlckit_load() {
   fi
 
   local current_load rewritten_load
-  current_load="$(otool -L "${mediakit_binary}" | python3 "${VLCKIT_LOAD_HELPER}" --print-vlckit-load)"
+  current_load="$(otool -arch all -L "${mediakit_binary}" | python3 "${VLCKIT_LOAD_HELPER}" --print-vlckit-load)"
   rewritten_load="$(python3 "${VLCKIT_LOAD_HELPER}" --rewrite-load "${current_load}")"
   if [[ "${current_load}" == "${rewritten_load}" ]]; then
     echo "MediaKit VLCKit load command already nested: ${current_load}"
@@ -496,8 +543,9 @@ xcodebuild \
   -configuration Release \
   -derivedDataPath "${DERIVED_DATA_PATH}" \
   "CONFIGURATION_BUILD_DIR=${STAGING_BUILD_DIR}" \
-  ARCHS="${ARCH}" \
+  ARCHS="${MACOS_ARCH}" \
   ONLY_ACTIVE_ARCH=YES \
+  EXCLUDED_ARCHS= \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   build
@@ -517,17 +565,34 @@ if [[ ! -f "${STAGED_APP}/Contents/MacOS/${APP_NAME}" ]]; then
   exit 1
 fi
 
+# This job's slice must be present. A fat nested VLCKit still counts.
+python3 "${SLICE_HELPER}" \
+  --require "${MACOS_ARCH}" \
+  --must-include "Contents/MacOS/${APP_NAME}" \
+  --must-include "VLCKit.framework" \
+  "${STAGED_APP}"
+
+if [[ "${COMPILE_ONLY}" -eq 1 ]]; then
+  echo "Compile-only: unsigned ${ARCH_LABEL} app staged at ${STAGED_APP}"
+  echo "ARCHS=${MACOS_ARCH} ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO"
+  echo "Skipping Developer ID import, notarytool, stapler, zip, and dmg."
+  exit 0
+fi
+
 # Stamp before codesign so the sealed Info.plist matches the artifact/tag.
 # Never rewrite Config/MatrixClient-Info.plist in git.
 stamp_release_versions_on_app "${STAGED_APP}"
 
 sign_app_bundle "${STAGED_APP}"
 
-ARCHIVE_PATH="${DELIVERABLE_DIR}/${APP_NAME}-${APP_VERSION}-macos-${ARCH}.zip"
-DMG_PATH="${DELIVERABLE_DIR}/${APP_NAME}-${APP_VERSION}-macos-${ARCH}.dmg"
+ARCHIVE_PATH="${DELIVERABLE_DIR}/${APP_NAME}-${APP_VERSION}-macos-${ARCH_LABEL}.zip"
+DMG_PATH="${DELIVERABLE_DIR}/${APP_NAME}-${APP_VERSION}-macos-${ARCH_LABEL}.dmg"
 NOTARY_ZIP_PATH="${WORK_DIR}/${APP_NAME}-notarize.zip"
 
 if notarization_requested; then
+  # Apple cannot staple a zip. Submit a zip of the Developer ID-signed .app,
+  # stapler staple that .app, then ship a new zip of the stapled .app. The
+  # notary zip is deleted and is not a release asset.
   zip_app_bundle "${STAGED_APP}" "${NOTARY_ZIP_PATH}"
   submit_for_notarization "${NOTARY_ZIP_PATH}" "app"
   rm -f "${NOTARY_ZIP_PATH}"
@@ -551,7 +616,7 @@ ditto "${STAGED_APP}" "${DELIVERABLE_DIR}/${APP_NAME}.app"
   shasum -a 256 \
     "$(basename "${ARCHIVE_PATH}")" \
     "$(basename "${DMG_PATH}")"
-} > "${DELIVERABLE_DIR}/SHA256SUMS"
+} > "${DELIVERABLE_DIR}/SHA256SUMS-macos-${ARCH_LABEL}"
 
 echo "Created ${ARCHIVE_PATH}"
 echo "Created ${DMG_PATH}"
@@ -570,6 +635,6 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
   {
     echo "app_version=${APP_VERSION}"
     echo "bundle_version=${BUNDLE_VERSION}"
-    echo "arch=${ARCH}"
+    echo "arch=${ARCH_LABEL}"
   } >> "${GITHUB_OUTPUT}"
 fi

@@ -23,6 +23,7 @@ public struct GitHubReleaseSummary: Hashable, Sendable {
 
     public func macOSDiskImage(architecture: String) -> GitHubReleaseAsset? {
         let arch = architecture.lowercased()
+        // Dedicated per-arch assets only. Do not fall back to a universal filename.
         let suffix = "-macos-\(arch).dmg"
         return assets.first { asset in
             let name = asset.name.lowercased()
