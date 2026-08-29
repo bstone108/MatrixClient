@@ -148,3 +148,19 @@ func githubReleaseFeedIgnoresUniversalDmg() throws {
     #expect(appleSilicon?.1.name == "MatrixClient-2026.8.27.1-macos-arm64.dmg")
     #expect(intel?.1.name == "MatrixClient-2026.8.27.1-macos-x86_64.dmg")
 }
+
+@Test
+func githubReleaseFeedSparkleURLsArePerArchAndNeverUniversal() throws {
+    let version = try #require(DateBuildVersion.parse("2026.8.28.1"))
+    let armFeed = try #require(GitHubReleaseFeed.appcastURL(architecture: "arm64"))
+    let intelFeed = try #require(GitHubReleaseFeed.appcastURL(architecture: "x86_64"))
+    #expect(armFeed.absoluteString.hasSuffix("/releases/latest/download/appcast-arm64.xml"))
+    #expect(intelFeed.absoluteString.hasSuffix("/releases/latest/download/appcast-x86_64.xml"))
+    #expect(GitHubReleaseFeed.appcastURL(architecture: "universal") == nil)
+
+    let armDmg = try #require(GitHubReleaseFeed.diskImageDownloadURL(version: version, architecture: "arm64"))
+    let intelDmg = try #require(GitHubReleaseFeed.diskImageDownloadURL(version: version, architecture: "x86_64"))
+    #expect(armDmg.lastPathComponent == "MatrixClient-2026.8.28.1-macos-arm64.dmg")
+    #expect(intelDmg.lastPathComponent == "MatrixClient-2026.8.28.1-macos-x86_64.dmg")
+    #expect(GitHubReleaseFeed.diskImageDownloadURL(version: version, architecture: "universal") == nil)
+}

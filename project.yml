@@ -17,6 +17,9 @@ packages:
   VLCKitSPM:
     url: https://github.com/tylerjonesio/vlckit-spm.git
     exactVersion: 3.6.0
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle.git
+    exactVersion: 2.9.6
 targets:
   MatrixClient:
     type: application
@@ -28,6 +31,8 @@ targets:
         buildPhase: resources
     dependencies:
       - target: AppShell
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.brandonstone.MatrixClient
@@ -50,6 +55,8 @@ targets:
       - target: MediaKit
       - target: Persistence
       - target: Diagnostics
+      - package: Sparkle
+        product: Sparkle
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.brandonstone.MatrixClient.AppShell

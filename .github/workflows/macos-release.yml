@@ -118,6 +118,7 @@ jobs:
           python3 scripts/next-date-build-version.py --self-test
           python3 scripts/verify-mediakit-vlckit-load.py --self-test
           python3 scripts/verify-macos-slices.py --self-test
+          python3 scripts/sparkle-appcast.py --self-test
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -150,6 +151,7 @@ jobs:
           python3 scripts/next-date-build-version.py --self-test
           python3 scripts/verify-mediakit-vlckit-load.py --self-test
           python3 scripts/verify-macos-slices.py --self-test
+          python3 scripts/sparkle-appcast.py --self-test
 
       - name: Install xcodegen
         run: brew install xcodegen
@@ -174,6 +176,7 @@ jobs:
           MATRIXCLIENT_VERSION: ${{ needs.gate.outputs.app_version }}
           MATRIXCLIENT_ARCH: ${{ matrix.arch }}
           MATRIXCLIENT_VERSION_DEBUG: "1"
+          SPARKLE_PRIVATE_ED_KEY: ${{ secrets.SPARKLE_PRIVATE_ED_KEY }}
         run: ./scripts/package-macos.sh
 
       - name: Upload macOS artifacts
@@ -183,6 +186,7 @@ jobs:
           path: |
             build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ matrix.arch }}.zip
             build/MatrixClient-${{ steps.package.outputs.app_version }}-macos-${{ matrix.arch }}.dmg
+            build/appcast-${{ matrix.arch }}.xml
             build/SHA256SUMS-macos-${{ matrix.arch }}
           if-no-files-found: error
 
@@ -227,9 +231,26 @@ jobs:
           title="MatrixClient ${APP_VERSION}"
           notes="Developer ID-signed, notarized, and stapled macOS builds (Apple Silicon arm64 and Intel x86_64) for ${APP_VERSION}."
           mapfile -d '' assets < <(find release-artifacts -type f -print0)
-          if [[ "${#assets[@]}" -lt 4 ]]; then
-            echo "Expected arm64 and x86_64 zip/dmg assets; found:" >&2
+          if [[ "${#assets[@]}" -lt 6 ]]; then
+            echo "Expected arm64 and x86_64 zip/dmg/appcast assets; found:" >&2
             find release-artifacts -type f >&2 || true
+            exit 1
+          fi
+          if [[ -z "$(find release-artifacts -name appcast-arm64.xml -print -quit)" || -z "$(find release-artifacts -name appcast-x86_64.xml -print -quit)" ]]; then
+            echo "Missing per-arch Sparkle appcast files." >&2
+            find release-artifacts -type f >&2 || true
+            exit 1
+          fi
+          if grep -RFi "universal" release-artifacts --include 'appcast-*.xml'; then
+            echo "Sparkle appcast must not mention a universal disk image." >&2
+            exit 1
+          fi
+          if ! grep -RF "macos-arm64.dmg" release-artifacts --include 'appcast-arm64.xml' >/dev/null; then
+            echo "arm64 appcast is missing the dedicated arm64 disk image." >&2
+            exit 1
+          fi
+          if ! grep -RF "macos-x86_64.dmg" release-artifacts --include 'appcast-x86_64.xml' >/dev/null; then
+            echo "x86_64 appcast is missing the dedicated x86_64 disk image." >&2
             exit 1
           fi
           if gh release view "${tag}" --repo "${GH_REPO}" >/dev/null 2>&1; then

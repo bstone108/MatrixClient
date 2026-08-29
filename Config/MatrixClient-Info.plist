@@ -30,6 +30,16 @@
   <string></string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
+  <key>SUFeedURL</key>
+  <string>https://github.com/bstone108/MatrixClient/releases/latest/download/appcast-arm64.xml</string>
+  <key>SUPublicEDKey</key>
+  <string>Dqcphd4kX+Hp19SWREIiUl5r6XubhMwwAa+8Qp6IU04=</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>SUScheduledCheckInterval</key>
+  <integer>172800</integer>
+  <key>SUAutomaticallyUpdate</key>
+  <false/>
 </dict>
 </plist>
 

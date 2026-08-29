@@ -36,6 +36,28 @@ public enum GitHubReleaseFeed {
     public static let repositoryPath = "bstone108/MatrixClient"
     public static let releasesURL = URL(string: "https://api.github.com/repos/bstone108/MatrixClient/releases")!
 
+    public static func currentArchitecture() -> String {
+        #if arch(arm64)
+        return "arm64"
+        #else
+        return "x86_64"
+        #endif
+    }
+
+    /// Stable GitHub Releases URL for the latest per-arch Sparkle appcast.
+    public static func appcastURL(architecture: String) -> URL? {
+        let arch = architecture.lowercased()
+        guard arch == "arm64" || arch == "x86_64" else { return nil }
+        return URL(string: "https://github.com/\(repositoryPath)/releases/latest/download/appcast-\(arch).xml")
+    }
+
+    public static func diskImageDownloadURL(version: DateBuildVersion, architecture: String) -> URL? {
+        let arch = architecture.lowercased()
+        guard arch == "arm64" || arch == "x86_64" else { return nil }
+        let name = "MatrixClient-\(version.rawValue)-macos-\(arch).dmg"
+        return URL(string: "https://github.com/\(repositoryPath)/releases/download/v\(version.rawValue)/\(name)")
+    }
+
     public static func parseReleases(from data: Data) throws -> [GitHubReleaseSummary] {
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
