@@ -57,7 +57,6 @@
 		A2B6C98BF22CF87E4B7C50B3 /* VLCKitSPM in Frameworks */ = {isa = PBXBuildFile; productRef = 5450F49E124291D4EF16F4D0 /* VLCKitSPM */; };
 		A44444444444444444444413 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A44444444444444444444411 /* Sparkle */; };
 		A44444444444444444444414 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = A44444444444444444444412 /* Sparkle */; };
-		A44444444444444444444415 /* Sparkle in Embed Frameworks */ = {isa = PBXBuildFile; productRef = A44444444444444444444412 /* Sparkle */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		A3938EAA298B76BDF48DEC42 /* PersistedRoomSummaryRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D4A2567C76418A352201302 /* PersistedRoomSummaryRepository.swift */; };
 		AA998F6F95B77FCF48E99B30 /* AppShell.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 29ED0A2C6DBEAA489B9B5F14 /* AppShell.framework */; };
 		B1A5708C81B6F71EFAC97573 /* QueuedMessageRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB38A79F3BBDA97B951F6412 /* QueuedMessageRepositoryTests.swift */; };
@@ -251,7 +250,6 @@
 			dstSubfolderSpec = 10;
 			files = (
 				D2E138EE48D975D55A520384 /* AppShell.framework in Embed Frameworks */,
-				A44444444444444444444415 /* Sparkle in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
