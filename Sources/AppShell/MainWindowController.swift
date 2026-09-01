@@ -146,7 +146,7 @@ final class MainWindowController: NSWindowController {
 
         state.addSelectionObserver { [weak self] in
             guard let self else { return }
-            if case .connected = self.state.sessionState {
+            if self.state.sessionState.showsWorkspace {
                 self.window?.title = self.state.currentWindowTitle
             }
         }
@@ -302,7 +302,7 @@ final class MainWindowController: NSWindowController {
 
     private func updatePresentation() {
         switch state.sessionState {
-        case .connected:
+        case .connected, .reconnecting:
             window?.contentViewController = splitViewController
             window?.toolbar = toolbarController
             window?.title = state.currentWindowTitle

@@ -854,13 +854,14 @@ public enum ClientSessionState: Equatable, Sendable {
     case restoring(message: String)
     case signingIn(message: String)
     case signedOut(message: String?)
+    case reconnecting(message: String)
     case connected
 
     public var statusMessage: String? {
         switch self {
         case .launching:
             return "Launching…"
-        case let .restoring(message), let .signingIn(message):
+        case let .restoring(message), let .signingIn(message), let .reconnecting(message):
             return message
         case let .signedOut(message):
             return message
@@ -873,7 +874,17 @@ public enum ClientSessionState: Equatable, Sendable {
         switch self {
         case .launching, .restoring, .signingIn:
             return true
-        case .signedOut, .connected:
+        case .signedOut, .reconnecting, .connected:
+            return false
+        }
+    }
+
+    /// Main workspace (not the login card) should be on screen.
+    public var showsWorkspace: Bool {
+        switch self {
+        case .connected, .reconnecting:
+            return true
+        case .launching, .restoring, .signingIn, .signedOut:
             return false
         }
     }

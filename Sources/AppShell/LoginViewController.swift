@@ -139,7 +139,7 @@ final class LoginViewController: NSViewController {
                 statusField.isHidden = true
                 statusField.stringValue = ""
             }
-        case .connected:
+        case .connected, .reconnecting:
             statusField.isHidden = true
             statusField.stringValue = ""
         }

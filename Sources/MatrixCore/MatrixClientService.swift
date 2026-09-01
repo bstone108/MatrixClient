@@ -16,6 +16,10 @@ public actor MatrixClientService: MatrixClientFacade {
     private var sessions: [AccountIdentifier: AccountSessionActor] = [:]
     private var accountOrder: [AccountIdentifier] = []
     private var sessionNotificationTasks: [AccountIdentifier: Task<Void, Never>] = [:]
+    private var reconnectTask: Task<Void, Never>?
+    private var cachedAccountSummaries: [AccountIdentifier: AccountSummary] = [:]
+    private var offlineRoomSummaries: [AccountIdentifier: [RoomSummary]] = [:]
+    private var offlineTimelines: [AccountIdentifier: [RoomIdentifier: [TimelineItem]]] = [:]
     private var bootstrapped = false
 
     public init(database: AppDatabase, diagnostics: DiagnosticsService) {
@@ -27,39 +31,23 @@ public actor MatrixClientService: MatrixClientFacade {
     public func bootstrapIfNeeded() async {
         guard !bootstrapped else { return }
         bootstrapped = true
-        sessionStateBroadcaster.yield(.restoring(message: "Restoring saved session…"))
 
         do {
             let persistedSessions = try sessionStore.loadPersistedSessions()
-            guard !persistedSessions.isEmpty else {
-                sessionStateBroadcaster.yield(.signedOut(message: nil))
-                return
+            let records = persistedSessions.map {
+                SavedSessionRecord(accountID: $0.accountID, userID: $0.userID, homeserverURL: $0.homeserverURL)
+            }
+            let plan = SavedSessionRestorePolicy.startupPlan(persistedSessions: records)
+            cachedAccountSummaries = Dictionary(uniqueKeysWithValues: plan.summaries.map { ($0.accountID, $0) })
+            accountOrder = plan.summaries.map(\.accountID)
+            sessionStateBroadcaster.yield(plan.immediateState)
+            await loadOfflineWorkspace(from: persistedSessions)
+            if plan.startBackgroundReconnect {
+                sessionStateBroadcaster.yield(plan.immediateState)
             }
 
-            for persistedSession in persistedSessions {
-                do {
-                    let session = try await AccountSessionActor.restore(
-                        persistedSession: persistedSession,
-                        sessionStore: sessionStore,
-                        applicationSupportURL: database.paths.applicationSupportURL,
-                        database: database,
-                        diagnostics: diagnostics
-                    )
-                    try await session.bootstrapIfNeeded()
-                    sessions[session.summary.accountID] = session
-                    accountOrder.append(session.summary.accountID)
-                    attachNotificationStream(for: session)
-                } catch {
-                    try? sessionStore.remove(accountID: persistedSession.accountID)
-                    await diagnostics.record(.error, category: "Auth", message: "Failed to restore session", metadata: [
-                        "accountID": persistedSession.accountID,
-                        "error": userVisibleErrorMessage(error)
-                    ])
-                }
-            }
-
-            accountOrder = Array(Set(accountOrder)).sorted { $0.rawValue < $1.rawValue }
-            sessionStateBroadcaster.yield(sessions.isEmpty ? .signedOut(message: "Saved session could not be restored.") : .connected)
+            guard plan.startBackgroundReconnect else { return }
+            startBackgroundReconnect(persistedSessions, startingAttempt: 0)
         } catch {
             await diagnostics.record(.error, category: "Auth", message: "Failed to read persisted sessions", metadata: [
                 "error": userVisibleErrorMessage(error)
@@ -131,7 +119,26 @@ public actor MatrixClientService: MatrixClientFacade {
     }
 
     public func removeAccount(_ accountID: AccountIdentifier) async throws {
-        guard let session = sessions[accountID] else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        cachedAccountSummaries.removeValue(forKey: accountID)
+        offlineRoomSummaries.removeValue(forKey: accountID)
+        offlineTimelines.removeValue(forKey: accountID)
+        guard let session = sessions[accountID] else {
+            do {
+                try sessionStore.remove(accountID: accountID.rawValue)
+            } catch {
+                await diagnostics.record(.error, category: "Auth", message: "Failed to remove persisted session", metadata: [
+                    "accountID": accountID.rawValue,
+                    "error": userVisibleErrorMessage(error)
+                ])
+                throw error
+            }
+            accountOrder.removeAll { $0 == accountID }
+            yieldStateAfterAccountRemoval()
+            startBackgroundReconnectIfNeeded()
+            return
+        }
 
         sessionNotificationTasks[accountID]?.cancel()
         sessionNotificationTasks.removeValue(forKey: accountID)
@@ -150,20 +157,19 @@ public actor MatrixClientService: MatrixClientFacade {
         sessions.removeValue(forKey: accountID)
         accountOrder.removeAll { $0 == accountID }
 
-        if sessions.isEmpty {
-            sessionStateBroadcaster.yield(.signedOut(message: nil))
-        } else {
-            sessionStateBroadcaster.yield(.connected)
-        }
+        yieldStateAfterAccountRemoval()
+        startBackgroundReconnectIfNeeded()
     }
 
     public func accountSummaries() async -> [AccountSummary] {
-        accountOrder.compactMap { sessions[$0]?.summary }
+        accountOrder.compactMap { sessions[$0]?.summary ?? cachedAccountSummaries[$0] }
     }
 
     public func allKnownRoomSummaries(for accountID: AccountIdentifier) async -> [RoomSummary] {
-        guard let session = sessions[accountID] else { return [] }
-        return await session.allKnownRoomSummaries()
+        if let session = sessions[accountID] {
+            return await session.allKnownRoomSummaries()
+        }
+        return offlineRoomSummaries[accountID, default: []]
     }
 
     public func spaceSummaries(for accountID: AccountIdentifier) async -> [SpaceSummary] {
@@ -172,13 +178,25 @@ public actor MatrixClientService: MatrixClientFacade {
     }
 
     public func roomListStream(for accountID: AccountIdentifier, spaceID: SpaceIdentifier?) async -> AsyncStream<[RoomSummary]> {
-        guard let session = sessions[accountID] else { return AsyncStream { _ in } }
-        return await session.roomListStream(spaceID: spaceID)
+        if let session = sessions[accountID] {
+            return await session.roomListStream(spaceID: spaceID)
+        }
+        let cached = offlineRoomSummaries[accountID, default: []]
+        return AsyncStream { continuation in
+            continuation.yield(cached)
+            continuation.finish()
+        }
     }
 
     public func timelineStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<[TimelineItem]> {
-        guard let session = sessions[accountID] else { return AsyncStream { _ in } }
-        return await session.timelineStream(roomID: roomID)
+        if let session = sessions[accountID] {
+            return await session.timelineStream(roomID: roomID)
+        }
+        let cached = offlineTimelines[accountID]?[roomID] ?? []
+        return AsyncStream { continuation in
+            continuation.yield(cached)
+            continuation.finish()
+        }
     }
 
     public func timelineHistoryStatusStream(for accountID: AccountIdentifier, roomID: RoomIdentifier) async -> AsyncStream<TimelineHistoryStatus> {
@@ -396,6 +414,8 @@ public actor MatrixClientService: MatrixClientFacade {
         username: String,
         password: String
     ) async throws -> AccountSessionActor {
+        reconnectTask?.cancel()
+        reconnectTask = nil
         let session = try await AccountSessionActor.login(
             serverNameOrURL: serverNameOrURL,
             username: username,
@@ -418,6 +438,7 @@ public actor MatrixClientService: MatrixClientFacade {
             accountOrder.sort { $0.rawValue < $1.rawValue }
         }
 
+        cachedAccountSummaries[session.summary.accountID] = session.summary
         Task { [diagnostics] in
             do {
                 try await session.bootstrapIfNeeded()
@@ -428,7 +449,148 @@ public actor MatrixClientService: MatrixClientFacade {
                 ])
             }
         }
+        startBackgroundReconnectIfNeeded()
         return session
+    }
+
+    private func yieldStateAfterAccountRemoval() {
+        if !sessions.isEmpty {
+            sessionStateBroadcaster.yield(.connected)
+        } else if !cachedAccountSummaries.isEmpty {
+            sessionStateBroadcaster.yield(.reconnecting(message: SavedSessionRestorePolicy.reconnectingMessage))
+        } else {
+            sessionStateBroadcaster.yield(.signedOut(message: nil))
+        }
+    }
+
+    private func startBackgroundReconnectIfNeeded() {
+        guard let persistedSessions = try? sessionStore.loadPersistedSessions() else { return }
+        let pending = persistedSessions.filter { sessions[AccountIdentifier(rawValue: $0.accountID)] == nil }
+        guard !pending.isEmpty else { return }
+        startBackgroundReconnect(pending, startingAttempt: 0)
+    }
+
+    private func startBackgroundReconnect(_ persistedSessions: [PersistedAccountSession], startingAttempt: Int) {
+        reconnectTask?.cancel()
+        reconnectTask = Task {
+            await self.reconnectPersistedSessions(persistedSessions, startingAttempt: startingAttempt)
+        }
+    }
+
+    private func loadOfflineWorkspace(from persistedSessions: [PersistedAccountSession]) async {
+        for persisted in persistedSessions {
+            let accountID = AccountIdentifier(rawValue: persisted.accountID)
+            let roomRepo = PersistedRoomSummaryRepository(
+                database: database,
+                diagnostics: diagnostics,
+                accountID: persisted.accountID
+            )
+            let timelineRepo = PersistedTimelineRepository(
+                database: database,
+                diagnostics: diagnostics,
+                accountID: persisted.accountID
+            )
+            do {
+                let roomPayloads = try await roomRepo.fetchAll()
+                let rooms = roomPayloads.compactMap { PersistedWorkspaceCodec.decodeRoomSummary(from: $0.payload) }
+                    .sorted { $0.timestamp > $1.timestamp }
+                offlineRoomSummaries[accountID] = rooms
+
+                var timelines: [RoomIdentifier: [TimelineItem]] = [:]
+                for room in rooms {
+                    let records = try await timelineRepo.fetch(roomID: room.roomID.rawValue)
+                    let items = records.compactMap { PersistedWorkspaceCodec.decodeTimelineItem(from: $0.payload) }
+                    if !items.isEmpty {
+                        timelines[room.roomID] = TimelineItemReconciler.deduplicated(items)
+                    }
+                }
+                offlineTimelines[accountID] = timelines
+            } catch {
+                await diagnostics.record(.error, category: "Auth", message: "Failed to load offline workspace cache", metadata: [
+                    "accountID": persisted.accountID,
+                    "error": error.localizedDescription
+                ])
+            }
+        }
+    }
+
+    private func reconnectPersistedSessions(_ persistedSessions: [PersistedAccountSession], startingAttempt: Int) async {
+        var pending = persistedSessions.filter { sessions[AccountIdentifier(rawValue: $0.accountID)] == nil }
+        var attempt = startingAttempt
+        var restoredCount = sessions.count
+
+        while !Task.isCancelled, !pending.isEmpty {
+            var results: [String: Result<Void, SavedSessionRestoreFailure>] = [:]
+            var nextPending: [PersistedAccountSession] = []
+
+            for persisted in pending {
+                if Task.isCancelled { return }
+                let accountID = AccountIdentifier(rawValue: persisted.accountID)
+                if sessions[accountID] != nil {
+                    results[persisted.accountID] = .success(())
+                    continue
+                }
+                do {
+                    let session = try await AccountSessionActor.restore(
+                        persistedSession: persisted,
+                        sessionStore: sessionStore,
+                        applicationSupportURL: database.paths.applicationSupportURL,
+                        database: database,
+                        diagnostics: diagnostics
+                    )
+                    try await session.bootstrapIfNeeded()
+                    if Task.isCancelled || sessions[session.summary.accountID] != nil {
+                        await session.shutdown(logoutRemote: false)
+                        if sessions[session.summary.accountID] != nil {
+                            results[persisted.accountID] = .success(())
+                            continue
+                        }
+                        return
+                    }
+                    sessions[session.summary.accountID] = session
+                    cachedAccountSummaries[session.summary.accountID] = session.summary
+                    attachNotificationStream(for: session)
+                    results[persisted.accountID] = .success(())
+                } catch {
+                    let kind = SavedSessionRestorePolicy.classify(error)
+                    await diagnostics.record(.error, category: "Auth", message: "Failed to restore session", metadata: [
+                        "accountID": persisted.accountID,
+                        "kind": kind == .transient ? "transient" : "invalid",
+                        "error": userVisibleErrorMessage(error)
+                    ])
+                    if SavedSessionRestorePolicy.shouldRemovePersistedSession(for: error) {
+                        try? sessionStore.remove(accountID: persisted.accountID)
+                        cachedAccountSummaries.removeValue(forKey: AccountIdentifier(rawValue: persisted.accountID))
+                        accountOrder.removeAll { $0.rawValue == persisted.accountID }
+                        results[persisted.accountID] = .failure(.corruptSession)
+                    } else {
+                        results[persisted.accountID] = .failure(.unreachableHomeserver)
+                        nextPending.append(persisted)
+                    }
+                }
+            }
+
+            let records = pending.map {
+                SavedSessionRecord(accountID: $0.accountID, userID: $0.userID, homeserverURL: $0.homeserverURL)
+            }
+            let outcome = SavedSessionRestorePolicy.outcomeAfterAttempt(
+                pending: records,
+                results: results,
+                alreadyRestoredCount: restoredCount,
+                attempt: attempt
+            )
+            restoredCount = sessions.count
+            pending = nextPending
+            accountOrder = Array(Set(accountOrder + sessions.keys)).sorted { $0.rawValue < $1.rawValue }
+            sessionStateBroadcaster.yield(outcome.nextState)
+
+            if outcome.retryDelay == nil {
+                return
+            }
+            let delay = outcome.retryDelay ?? SavedSessionRestorePolicy.maxRetryDelay
+            attempt += 1
+            try? await Task.sleep(for: .seconds(delay))
+        }
     }
 
     private func attachNotificationStream(for session: AccountSessionActor) {
