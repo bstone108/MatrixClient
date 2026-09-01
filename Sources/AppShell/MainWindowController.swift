@@ -1,14 +1,9 @@
 import AppKit
+import MatrixCore
 import MediaKit
 import TimelineUI
 
 final class MainWindowController: NSWindowController {
-    private enum WindowMetrics {
-        static let defaultSize = NSSize(width: 1_680, height: 980)
-        static let minimumSize = NSSize(width: 960, height: 640)
-        static let collapsedThreshold = NSSize(width: 320, height: 240)
-        static let screenMargin: CGFloat = 40
-    }
 
     private enum WindowPersistence {
         static let frameKey = "MainWindow.frame"
@@ -31,18 +26,21 @@ final class MainWindowController: NSWindowController {
         self.state = state
         self.videoPlaybackEngine = videoPlaybackEngine
         let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: WindowMetrics.defaultSize),
+            contentRect: NSRect(origin: .zero, size: NSSize(width: WindowFramePolicy.defaultSize.width, height: WindowFramePolicy.defaultSize.height)),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Matrix Client"
-        window.minSize = WindowMetrics.minimumSize
+        window.minSize = NSSize(
+            width: WindowFramePolicy.minimumSize.width,
+            height: WindowFramePolicy.minimumSize.height
+        )
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         super.init(window: window)
         window.delegate = self
-        shouldCascadeWindows = true
+        shouldCascadeWindows = false
         restorePersistedWindowFrame()
         buildWorkspaceUI()
         updatePresentation()
@@ -149,6 +147,7 @@ final class MainWindowController: NSWindowController {
             if self.state.sessionState.showsWorkspace {
                 self.window?.title = self.state.currentWindowTitle
             }
+            self.constrainWindowFrameToVisibleDisplay(allowPersistedFallback: false)
         }
         state.addSessionObserver { [weak self] in
             self?.updatePresentation()
@@ -165,58 +164,77 @@ final class MainWindowController: NSWindowController {
     private func restorePersistedWindowFrame() {
         guard window != nil else { return }
         if let storedFrame = persistedWindowFrame() {
-            applyManagedFrame(sanitizedFrame(for: storedFrame, centerIfNeeded: false), display: false)
+            let screens = NSScreen.screens.map { CGRect($0.visibleFrame) }
+            let visible = WindowFramePolicy.visibleFrame(containing: CGRect(storedFrame), screens: screens)
+                ?? screens.first
+                ?? CGRect(NSScreen.main?.visibleFrame ?? .zero)
+            applyManagedFrame(
+                NSRect(WindowFramePolicy.sanitizedFrame(CGRect(storedFrame), visibleFrame: visible, centerIfNeeded: false)),
+                display: false
+            )
         } else {
             applyManagedFrame(defaultWindowFrame(centered: true), display: false)
         }
     }
 
     private func restoreWindowFrameIfNeeded(centerIfReset: Bool) {
-        guard let window else { return }
-
-        let currentFrame = window.frame
-        let hasUsableSize = currentFrame.width >= WindowMetrics.collapsedThreshold.width &&
-            currentFrame.height >= WindowMetrics.collapsedThreshold.height
-        let isOnScreen = visibleFrame(containing: currentFrame)?.intersects(currentFrame) ?? false
-
-        guard !hasUsableSize || !isOnScreen else { return }
-
-        let fallbackFrame = persistedWindowFrame() ?? defaultWindowFrame(centered: centerIfReset)
-        applyManagedFrame(sanitizedFrame(for: fallbackFrame, centerIfNeeded: centerIfReset), display: false)
+        constrainWindowFrameToVisibleDisplay(allowPersistedFallback: true, centerIfUnusable: centerIfReset)
     }
 
     private func scheduleWindowFrameStabilization(preferPersistedFrame: Bool, centerIfNeeded: Bool) {
         frameStabilizationTask?.cancel()
         frameStabilizationTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(50))
-            self?.stabilizeWindowFrame(preferPersistedFrame: preferPersistedFrame, centerIfNeeded: centerIfNeeded)
+            self?.constrainWindowFrameToVisibleDisplay(
+                allowPersistedFallback: preferPersistedFrame,
+                centerIfUnusable: centerIfNeeded
+            )
             try? await Task.sleep(for: .milliseconds(150))
-            self?.stabilizeWindowFrame(preferPersistedFrame: false, centerIfNeeded: centerIfNeeded)
+            self?.constrainWindowFrameToVisibleDisplay(allowPersistedFallback: false, centerIfUnusable: false)
             self?.isRestoringInitialFrame = false
             self?.saveWindowFrame()
         }
     }
 
-    private func stabilizeWindowFrame(preferPersistedFrame: Bool, centerIfNeeded: Bool) {
+    private func constrainWindowFrameToVisibleDisplay(
+        allowPersistedFallback: Bool,
+        centerIfUnusable: Bool = false
+    ) {
         guard let window else { return }
+        let screens = NSScreen.screens.map { CGRect($0.visibleFrame) }
+        let current = CGRect(window.frame)
+        let visible = WindowFramePolicy.visibleFrame(containing: current, screens: screens)
+            ?? screens.first
+            ?? CGRect(NSScreen.main?.visibleFrame ?? .zero)
 
-        let baseFrame: NSRect
-        if let persisted = persistedWindowFrame(), (preferPersistedFrame || !userAdjustedWindowFrame) {
-            baseFrame = persisted
-        } else if window.frame.width >= WindowMetrics.collapsedThreshold.width,
-                  window.frame.height >= WindowMetrics.collapsedThreshold.height {
-            baseFrame = window.frame
+        let minSize = WindowFramePolicy.clampedMinimumSize(within: visible)
+        window.minSize = NSSize(width: minSize.width, height: minSize.height)
+
+        if WindowFramePolicy.shouldPreserveCurrentFrame(current, in: visible) {
+            return
+        }
+
+        let base: CGRect
+        if allowPersistedFallback, let persisted = persistedWindowFrame() {
+            base = CGRect(persisted)
+        } else if WindowFramePolicy.isUsableSize(current.size) {
+            base = current
         } else if let persisted = persistedWindowFrame() {
-            baseFrame = persisted
+            base = CGRect(persisted)
         } else {
-            baseFrame = defaultWindowFrame(centered: centerIfNeeded)
+            base = CGRect(defaultWindowFrame(centered: centerIfUnusable))
         }
 
-        let targetFrame = sanitizedFrame(for: baseFrame, centerIfNeeded: centerIfNeeded)
-        if !window.frame.equalTo(targetFrame) {
-            applyManagedFrame(targetFrame, display: window.isVisible)
+        let target = NSRect(
+            WindowFramePolicy.sanitizedFrame(
+                base,
+                visibleFrame: visible,
+                centerIfNeeded: centerIfUnusable && !WindowFramePolicy.isUsableSize(current.size)
+            )
+        )
+        if !window.frame.equalTo(target) {
+            applyManagedFrame(target, display: window.isVisible)
         }
-        saveWindowFrame()
     }
 
     private func persistedWindowFrame() -> NSRect? {
@@ -231,7 +249,13 @@ final class MainWindowController: NSWindowController {
         guard !isApplyingManagedFrame else { return }
         guard !isRestoringInitialFrame else { return }
         guard window.isVisible, !window.isMiniaturized, !window.styleMask.contains(.fullScreen) else { return }
-        let frame = sanitizedFrame(for: window.frame, centerIfNeeded: false)
+        let frame = NSRect(
+            WindowFramePolicy.sanitizedFrame(
+                CGRect(window.frame),
+                visibleFrame: currentVisibleFrame(),
+                centerIfNeeded: false
+            )
+        )
         UserDefaults.standard.set(NSStringFromRect(frame), forKey: WindowPersistence.frameKey)
     }
 
@@ -245,59 +269,26 @@ final class MainWindowController: NSWindowController {
     }
 
     private func defaultWindowFrame(centered: Bool) -> NSRect {
-        let visibleFrame = NSScreen.main?.visibleFrame ?? NSRect(origin: .zero, size: WindowMetrics.defaultSize)
-        let width = min(WindowMetrics.defaultSize.width, visibleFrame.width)
-        let height = min(WindowMetrics.defaultSize.height, visibleFrame.height)
+        let visibleFrame = NSScreen.main?.visibleFrame
+            ?? NSRect(origin: .zero, size: NSSize(width: WindowFramePolicy.defaultSize.width, height: WindowFramePolicy.defaultSize.height))
+        let width = min(WindowFramePolicy.defaultSize.width, visibleFrame.width)
+        let height = min(WindowFramePolicy.defaultSize.height, visibleFrame.height)
         let originX = centered
             ? visibleFrame.midX - (width / 2)
-            : visibleFrame.minX + WindowMetrics.screenMargin
+            : visibleFrame.minX + WindowFramePolicy.screenMargin
         let originY = centered
             ? visibleFrame.midY - (height / 2)
-            : visibleFrame.maxY - height - WindowMetrics.screenMargin
+            : visibleFrame.maxY - height - WindowFramePolicy.screenMargin
         return NSRect(x: originX, y: originY, width: width, height: height).integral
     }
 
-    private func sanitizedFrame(for proposedFrame: NSRect, centerIfNeeded: Bool) -> NSRect {
-        let candidateVisibleFrame = visibleFrame(containing: proposedFrame) ?? NSScreen.main?.visibleFrame
-        guard let candidateVisibleFrame else {
-            return NSRect(origin: .zero, size: WindowMetrics.defaultSize).integral
+    private func currentVisibleFrame() -> CGRect {
+        let screens = NSScreen.screens.map { CGRect($0.visibleFrame) }
+        if let window,
+           let visible = WindowFramePolicy.visibleFrame(containing: CGRect(window.frame), screens: screens) {
+            return visible
         }
-
-        let minWidth = min(WindowMetrics.minimumSize.width, candidateVisibleFrame.width)
-        let minHeight = min(WindowMetrics.minimumSize.height, candidateVisibleFrame.height)
-
-        let preferredWidth = proposedFrame.width >= WindowMetrics.collapsedThreshold.width
-            ? proposedFrame.width
-            : WindowMetrics.defaultSize.width
-        let preferredHeight = proposedFrame.height >= WindowMetrics.collapsedThreshold.height
-            ? proposedFrame.height
-            : WindowMetrics.defaultSize.height
-
-        var frame = proposedFrame
-        frame.size.width = min(max(preferredWidth, minWidth), candidateVisibleFrame.width)
-        frame.size.height = min(max(preferredHeight, minHeight), candidateVisibleFrame.height)
-
-        if centerIfNeeded && (proposedFrame.width < WindowMetrics.collapsedThreshold.width ||
-            proposedFrame.height < WindowMetrics.collapsedThreshold.height) {
-            frame.origin.x = candidateVisibleFrame.midX - (frame.width / 2)
-            frame.origin.y = candidateVisibleFrame.midY - (frame.height / 2)
-        }
-
-        let minX = candidateVisibleFrame.minX
-        let maxX = candidateVisibleFrame.maxX - frame.width
-        let minY = candidateVisibleFrame.minY
-        let maxY = candidateVisibleFrame.maxY - frame.height
-
-        frame.origin.x = min(max(frame.origin.x, minX), maxX)
-        frame.origin.y = min(max(frame.origin.y, minY), maxY)
-
-        return frame.integral
-    }
-
-    private func visibleFrame(containing frame: NSRect) -> NSRect? {
-        let candidateFrames = NSScreen.screens.map(\.visibleFrame)
-        return candidateFrames.first(where: { $0.insetBy(dx: -WindowMetrics.screenMargin, dy: -WindowMetrics.screenMargin).intersects(frame) })
-            ?? candidateFrames.first
+        return screens.first ?? CGRect(NSScreen.main?.visibleFrame ?? .zero)
     }
 
     private func updatePresentation() {
@@ -312,8 +303,8 @@ final class MainWindowController: NSWindowController {
             window?.title = "Matrix Client"
         }
         isRestoringInitialFrame = true
-        restoreWindowFrameIfNeeded(centerIfReset: true)
-        scheduleWindowFrameStabilization(preferPersistedFrame: true, centerIfNeeded: true)
+        constrainWindowFrameToVisibleDisplay(allowPersistedFallback: true, centerIfUnusable: true)
+        scheduleWindowFrameStabilization(preferPersistedFrame: false, centerIfNeeded: false)
     }
 }
 
@@ -365,6 +356,7 @@ extension MainWindowController: NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {
         if !isApplyingManagedFrame, !isRestoringInitialFrame {
             userAdjustedWindowFrame = true
+            constrainWindowFrameToVisibleDisplay(allowPersistedFallback: false)
         }
         saveWindowFrame()
         persistInspectorCollapsedState()
@@ -376,11 +368,16 @@ extension MainWindowController: NSWindowDelegate {
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
-        scheduleWindowFrameStabilization(preferPersistedFrame: false, centerIfNeeded: false)
+        constrainWindowFrameToVisibleDisplay(allowPersistedFallback: false)
     }
 
     func windowDidChangeScreen(_ notification: Notification) {
-        scheduleWindowFrameStabilization(preferPersistedFrame: false, centerIfNeeded: false)
+        constrainWindowFrameToVisibleDisplay(allowPersistedFallback: false)
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        constrainWindowFrameToVisibleDisplay(allowPersistedFallback: false)
+        saveWindowFrame()
     }
 }
 

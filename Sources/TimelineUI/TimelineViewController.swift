@@ -701,8 +701,9 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     private let state: any TimelineWorkspaceState
     private let videoPlaybackEngine: any VideoPlaybackEngine
-    private let titleField = NSTextField(labelWithString: "No Room Selected")
-    private let subtitleField = NSTextField(labelWithString: "")
+    private let headerButton = NSButton(title: "No Room Selected", target: nil, action: nil)
+    private let subtitleField = NSTextField(wrappingLabelWithString: "")
+    private var isRoomHeaderExpanded = RoomHeaderExpansionPolicy.defaultExpanded
     private let historyBannerField = NSTextField(labelWithString: "")
     private let emptyField = NSTextField(wrappingLabelWithString: "")
     private let tableView = NSTableView(frame: .zero)
@@ -740,9 +741,21 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             self?.enqueueAttachments(from: urls)
         }
 
-        titleField.font = .systemFont(ofSize: 18, weight: .semibold)
+        headerButton.font = .systemFont(ofSize: 18, weight: .semibold)
+        headerButton.bezelStyle = .inline
+        headerButton.isBordered = false
+        headerButton.alignment = .left
+        headerButton.imagePosition = .noImage
+        headerButton.target = self
+        headerButton.action = #selector(toggleRoomHeader)
+        headerButton.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        headerButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         subtitleField.font = .systemFont(ofSize: 12)
         subtitleField.textColor = .secondaryLabelColor
+        subtitleField.maximumNumberOfLines = 4
+        subtitleField.lineBreakMode = .byWordWrapping
+        subtitleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        subtitleField.isHidden = true
         historyBannerField.font = .systemFont(ofSize: 11, weight: .medium)
         historyBannerField.textColor = .secondaryLabelColor
         historyBannerField.isHidden = true
@@ -752,10 +765,14 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         emptyField.maximumNumberOfLines = 0
         emptyField.isHidden = true
 
-        let headerStack = NSStackView(views: [titleField, subtitleField])
+        let headerStack = NSStackView(views: [headerButton, subtitleField])
         headerStack.orientation = .vertical
         headerStack.alignment = .leading
         headerStack.spacing = 2
+        headerStack.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        headerStack.setHuggingPriority(.defaultHigh, for: .vertical)
+        let topicClick = NSClickGestureRecognizer(target: self, action: #selector(toggleRoomHeader))
+        subtitleField.addGestureRecognizer(topicClick)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("timeline"))
         tableView.addTableColumn(column)
@@ -1036,31 +1053,49 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         focusComposerIfNeeded(force: true)
     }
 
+    @objc
+    private func toggleRoomHeader() {
+        guard state.selectedRoomSummary != nil else { return }
+        isRoomHeaderExpanded = RoomHeaderExpansionPolicy.expandedAfterToggle(isRoomHeaderExpanded)
+        applyRoomHeader()
+    }
+
+    private func applyRoomHeader() {
+        let summary = state.selectedRoomSummary
+        let roomName = summary?.displayName ?? "No Room Selected"
+        let subtitle = summary.map {
+            RoomHeaderExpansionPolicy.subtitle(for: $0.membership, topic: $0.topic)
+        } ?? ""
+        headerButton.title = roomName
+        subtitleField.stringValue = subtitle
+        subtitleField.isHidden = !RoomHeaderExpansionPolicy.showsSubtitle(
+            isExpanded: isRoomHeaderExpanded,
+            subtitle: subtitle
+        )
+        let canReveal = !subtitle.isEmpty
+        headerButton.setAccessibilityRole(.button)
+        headerButton.setAccessibilityLabel(
+            RoomHeaderExpansionPolicy.accessibilityLabel(
+                roomName: roomName,
+                isExpanded: isRoomHeaderExpanded,
+                canRevealSubtitle: canReveal
+            )
+        )
+        headerButton.setAccessibilityHelp(RoomHeaderExpansionPolicy.accessibilityHelp(canRevealSubtitle: canReveal))
+        headerButton.toolTip = summary?.roomID.rawValue
+    }
+
     private func reloadSelection() {
-        let previousRoomID = titleField.toolTip
         if let summary = state.selectedRoomSummary {
-            titleField.stringValue = summary.displayName
-            switch summary.membership {
-            case .notJoined:
-                subtitleField.stringValue = summary.topic.isEmpty ? "Not joined" : "Not joined  •  \(summary.topic)"
-            case .invited:
-                subtitleField.stringValue = summary.topic.isEmpty ? "Invited" : "Invited  •  \(summary.topic)"
-            case .left:
-                subtitleField.stringValue = "You left this room"
-            case .joined:
-                subtitleField.stringValue = summary.topic
-            }
-            titleField.toolTip = summary.roomID.rawValue
-            if previousRoomID != summary.roomID.rawValue {
+            if trackedRoomID != summary.roomID.rawValue {
+                isRoomHeaderExpanded = RoomHeaderExpansionPolicy.expandedAfterRoomChange()
                 didFocusComposerForCurrentRoom = false
                 pendingAttachments = []
                 liveFollow.resetForSelectedRoomChange()
                 trackedRoomID = summary.roomID.rawValue
             }
         } else {
-            titleField.stringValue = "No Room Selected"
-            subtitleField.stringValue = ""
-            titleField.toolTip = nil
+            isRoomHeaderExpanded = RoomHeaderExpansionPolicy.expandedAfterRoomChange()
             didFocusComposerForCurrentRoom = false
             pendingAttachments = []
             if trackedRoomID != nil {
@@ -1068,7 +1103,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
                 trackedRoomID = nil
             }
         }
-        subtitleField.isHidden = subtitleField.stringValue.isEmpty
+        applyRoomHeader()
         if let root = view as? FileDropView {
             root.isDropEnabled = state.selectedRoomSummary?.membership == .joined
         }

@@ -42,12 +42,15 @@ final class RoomListCellView: NSTableCellView {
     }
 
     func configure(room: RoomSummary, selected: Bool, notificationMode: RoomNotificationMode) {
-        titleField.stringValue = room.displayName
+        titleField.stringValue = RoomListPresentationPolicy.displayTitle(for: room)
+        titleField.setAccessibilityLabel(RoomListPresentationPolicy.accessibilityLabel(for: room))
+        setAccessibilityLabel(RoomListPresentationPolicy.accessibilityLabel(for: room))
         previewField.stringValue = roomListPreview(for: room)
-        badgeField.stringValue = room.unreadCount > 0 ? String(room.unreadCount) : ""
+        badgeField.stringValue = ""
+        badgeField.isHidden = true
         modeField.stringValue = notificationMode.shortLabel ?? ""
         modeField.isHidden = notificationMode.shortLabel == nil
-        titleField.font = .systemFont(ofSize: 13, weight: (selected || room.unreadCount > 0) ? .bold : .semibold)
+        titleField.font = .systemFont(ofSize: 13, weight: (selected || RoomListPresentationPolicy.hasUnread(room)) ? .bold : .semibold)
         titleField.textColor = room.membership == .notJoined ? .systemRed : .labelColor
 
         if selected {
@@ -270,26 +273,14 @@ final class RoomListViewController: NSViewController, NSTableViewDataSource, NST
     }
 
     private func rebuildRows() {
-        let invites = state.rooms.filter { $0.membership == .invited }
-        let unread = state.rooms.filter { $0.membership == .joined && $0.unreadCount > 0 }
-        let joined = state.rooms.filter { $0.membership == .joined && $0.unreadCount == 0 }
-        let other = state.rooms.filter { $0.membership != .joined && $0.membership != .invited }
-
+        let sections = RoomListPresentationPolicy.sections(
+            rooms: state.rooms,
+            inSpace: state.displayedSpaceID != nil
+        )
         var grouped: [ListRow] = []
-        func appendSection(_ title: String, rooms: [RoomSummary]) {
-            guard !rooms.isEmpty else { return }
-            grouped.append(.section(title))
-            grouped.append(contentsOf: rooms.map(ListRow.room))
-        }
-
-        appendSection("Invites", rooms: invites)
-        appendSection("Unread", rooms: unread)
-        if state.displayedSpaceID != nil {
-            appendSection("Joined rooms", rooms: joined)
-            appendSection("Not joined", rooms: other)
-        } else {
-            appendSection("Rooms", rooms: joined)
-            appendSection("Other", rooms: other)
+        for section in sections {
+            grouped.append(.section(section.title))
+            grouped.append(contentsOf: section.rooms.map(ListRow.room))
         }
         rows = grouped
     }
