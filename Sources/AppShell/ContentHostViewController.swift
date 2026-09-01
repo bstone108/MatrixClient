@@ -22,7 +22,12 @@ final class ContentHostViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView()
+        let root = NSView()
+        root.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
+        root.setContentHuggingPriority(.fittingSizeCompression, for: .vertical)
+        root.setContentCompressionResistancePriority(.fittingSizeCompression, for: .horizontal)
+        root.setContentCompressionResistancePriority(.fittingSizeCompression, for: .vertical)
+        view = root
     }
 
     override func viewDidLoad() {

@@ -755,6 +755,8 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         subtitleField.maximumNumberOfLines = 4
         subtitleField.lineBreakMode = .byWordWrapping
         subtitleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        subtitleField.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        subtitleField.setContentHuggingPriority(.defaultLow, for: .vertical)
         subtitleField.isHidden = true
         historyBannerField.font = .systemFont(ofSize: 11, weight: .medium)
         historyBannerField.textColor = .secondaryLabelColor

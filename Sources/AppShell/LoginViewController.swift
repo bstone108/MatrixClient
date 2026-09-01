@@ -22,7 +22,7 @@ final class LoginViewController: NSViewController {
     init(state: any LoginWorkspaceState) {
         self.state = state
         super.init(nibName: nil, bundle: nil)
-        preferredContentSize = NSSize(width: 900, height: 560)
+        preferredContentSize = .zero
     }
 
     required init?(coder: NSCoder) {
@@ -30,7 +30,11 @@ final class LoginViewController: NSViewController {
     }
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: preferredContentSize.width, height: preferredContentSize.height))
+        let root = NSView()
+        root.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
+        root.setContentHuggingPriority(.fittingSizeCompression, for: .vertical)
+        root.setContentCompressionResistancePriority(.fittingSizeCompression, for: .horizontal)
+        root.setContentCompressionResistancePriority(.fittingSizeCompression, for: .vertical)
 
         titleField.font = .systemFont(ofSize: 28, weight: .semibold)
         titleField.alignment = .center
@@ -82,10 +86,17 @@ final class LoginViewController: NSViewController {
         card.addSubview(contentStack)
         root.addSubview(card)
 
+        let preferredCardWidth = card.widthAnchor.constraint(equalToConstant: 680)
+        preferredCardWidth.priority = .defaultHigh
+
         NSLayoutConstraint.activate([
             card.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             card.centerYAnchor.constraint(equalTo: root.centerYAnchor),
-            card.widthAnchor.constraint(equalToConstant: 680),
+            card.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: 16),
+            card.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -16),
+            card.widthAnchor.constraint(lessThanOrEqualToConstant: 680),
+            card.widthAnchor.constraint(greaterThanOrEqualToConstant: 240),
+            preferredCardWidth,
 
             contentStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 28),
             contentStack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -28),

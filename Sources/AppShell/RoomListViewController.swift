@@ -13,8 +13,14 @@ final class RoomListCellView: NSTableCellView {
         layer?.cornerRadius = 10
         layer?.masksToBounds = true
         titleField.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleField.lineBreakMode = .byTruncatingTail
+        titleField.maximumNumberOfLines = 1
+        titleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         previewField.font = .systemFont(ofSize: 11)
         previewField.textColor = .secondaryLabelColor
+        previewField.lineBreakMode = .byTruncatingTail
+        previewField.maximumNumberOfLines = 1
+        previewField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         badgeField.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
         badgeField.textColor = .controlAccentColor
         modeField.font = .systemFont(ofSize: 10, weight: .medium)

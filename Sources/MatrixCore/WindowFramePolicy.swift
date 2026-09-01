@@ -1,16 +1,51 @@
 import CoreGraphics
 import Foundation
 
-/// Keeps the main window inside a display's visible frame without resetting a
-/// user-chosen size that already fits.
+/// Why a frame is being reconsidered. Content-driven reasons must never
+/// change a valid user-chosen size.
+public enum WindowFrameAdjustmentReason: String, Equatable, Sendable {
+    case userInteraction
+    case roomContent
+    case headerExpansion
+    case unreadList
+    case sessionPresentation
+    case splitView
+    case textLayout
+    case screenChange
+    case recovery
+}
+
+extension WindowFrameAdjustmentReason {
+    public var isContentDriven: Bool {
+        switch self {
+        case .roomContent, .headerExpansion, .unreadList, .sessionPresentation, .splitView, .textLayout:
+            return true
+        case .userInteraction, .screenChange, .recovery:
+            return false
+        }
+    }
+}
+
+/// Keeps the main window inside a display's visible frame.
+///
+/// A valid user size is never replaced because room content, the topic header,
+/// unread/list updates, session presentation, split views, or text layout
+/// changed. The only automatic size changes are: recover an absurd/corrupt
+/// frame (for example 2×2), or shrink a frame that cannot fit on the selected
+/// display so the window never extends off-screen.
 public enum WindowFramePolicy: Sendable {
     public static let defaultSize = CGSize(width: 1_680, height: 980)
-    public static let minimumSize = CGSize(width: 960, height: 640)
-    public static let collapsedThreshold = CGSize(width: 320, height: 240)
+    public static let recoverySize = defaultSize
+    /// Only frames smaller than this are treated as corrupt and recovered.
+    public static let absurdSizeThreshold = CGSize(width: 8, height: 8)
     public static let screenMargin: CGFloat = 40
 
+    public static func isAbsurdSize(_ size: CGSize) -> Bool {
+        size.width < absurdSizeThreshold.width || size.height < absurdSizeThreshold.height
+    }
+
     public static func isUsableSize(_ size: CGSize) -> Bool {
-        size.width >= collapsedThreshold.width && size.height >= collapsedThreshold.height
+        !isAbsurdSize(size)
     }
 
     public static func isFullyContained(_ frame: CGRect, in visibleFrame: CGRect) -> Bool {
@@ -22,9 +57,14 @@ public enum WindowFramePolicy: Sendable {
             && frame.height <= visibleFrame.height + 0.5
     }
 
-    /// Preserve a valid user frame; only rewrite when it is collapsed or off-screen.
     public static func shouldPreserveCurrentFrame(_ frame: CGRect, in visibleFrame: CGRect) -> Bool {
         isUsableSize(frame.size) && isFullyContained(frame, in: visibleFrame)
+    }
+
+    public static func allowsContentDrivenSizeChange(from: CGSize, to: CGSize) -> Bool {
+        _ = from
+        _ = to
+        return false
     }
 
     public static func visibleFrame(containing frame: CGRect, screens: [CGRect]) -> CGRect? {
@@ -38,29 +78,49 @@ public enum WindowFramePolicy: Sendable {
         }
     }
 
-    public static func sanitizedFrame(
-        _ proposed: CGRect,
+    /// Resolve a window frame. `current` is the last valid (or present) frame;
+    /// `proposed` is what layout/AppKit/the user asked for.
+    public static func resolvedFrame(
+        current: CGRect,
+        proposed: CGRect,
         visibleFrame: CGRect,
-        centerIfNeeded: Bool
+        reason: WindowFrameAdjustmentReason
     ) -> CGRect {
         guard visibleFrame.width > 0, visibleFrame.height > 0 else {
-            return CGRect(origin: .zero, size: defaultSize)
+            return CGRect(origin: .zero, size: recoverySize)
         }
 
-        let minWidth = min(minimumSize.width, visibleFrame.width)
-        let minHeight = min(minimumSize.height, visibleFrame.height)
-        let preferredWidth = isUsableSize(proposed.size) ? proposed.width : defaultSize.width
-        let preferredHeight = isUsableSize(proposed.size) ? proposed.height : defaultSize.height
-        let width = min(max(preferredWidth, minWidth), visibleFrame.width)
-        let height = min(max(preferredHeight, minHeight), visibleFrame.height)
-
-        var originX = proposed.origin.x
-        var originY = proposed.origin.y
-        if centerIfNeeded && !isUsableSize(proposed.size) {
-            originX = visibleFrame.midX - (width / 2)
-            originY = visibleFrame.midY - (height / 2)
+        if isAbsurdSize(current.size), isAbsurdSize(proposed.size) {
+            return recoveryFrame(in: visibleFrame)
         }
 
+        let source: CGRect
+        if reason.isContentDriven {
+            source = isUsableSize(current.size) ? current : proposed
+        } else if reason == .userInteraction {
+            source = proposed
+        } else if reason == .screenChange {
+            source = isUsableSize(current.size) ? current : proposed
+        } else {
+            source = isUsableSize(proposed.size) ? proposed : current
+        }
+
+        if isAbsurdSize(source.size) {
+            return recoveryFrame(in: visibleFrame)
+        }
+
+        var width = source.width
+        var height = source.height
+        if reason.isContentDriven, isUsableSize(current.size) {
+            width = current.width
+            height = current.height
+        }
+
+        width = min(width, visibleFrame.width)
+        height = min(height, visibleFrame.height)
+
+        var originX = source.origin.x
+        var originY = source.origin.y
         let minX = visibleFrame.minX
         let maxX = visibleFrame.maxX - width
         let minY = visibleFrame.minY
@@ -71,10 +131,44 @@ public enum WindowFramePolicy: Sendable {
         return CGRect(x: originX, y: originY, width: width, height: height)
     }
 
-    public static func clampedMinimumSize(within visibleFrame: CGRect) -> CGSize {
+    /// Persist restore and other single-rect sanitization: keep a valid size,
+    /// move/shrink only to stay inside `visibleFrame`.
+    public static func sanitizedFrame(
+        _ proposed: CGRect,
+        visibleFrame: CGRect,
+        centerIfNeeded: Bool
+    ) -> CGRect {
+        _ = centerIfNeeded
+        return resolvedFrame(
+            current: proposed,
+            proposed: proposed,
+            visibleFrame: visibleFrame,
+            reason: .userInteraction
+        )
+    }
+
+    public static func recoveryFrame(in visibleFrame: CGRect) -> CGRect {
+        let width = min(recoverySize.width, max(1, visibleFrame.width))
+        let height = min(recoverySize.height, max(1, visibleFrame.height))
+        return CGRect(
+            x: visibleFrame.midX - (width / 2),
+            y: visibleFrame.midY - (height / 2),
+            width: width,
+            height: height
+        )
+    }
+
+    public static func windowMinimumSize(within visibleFrame: CGRect) -> CGSize {
         CGSize(
-            width: min(minimumSize.width, max(1, visibleFrame.width)),
-            height: min(minimumSize.height, max(1, visibleFrame.height))
+            width: min(absurdSizeThreshold.width, max(1, visibleFrame.width)),
+            height: min(absurdSizeThreshold.height, max(1, visibleFrame.height))
+        )
+    }
+
+    public static func windowMaximumSize(within visibleFrame: CGRect) -> CGSize {
+        CGSize(
+            width: max(absurdSizeThreshold.width, visibleFrame.width),
+            height: max(absurdSizeThreshold.height, visibleFrame.height)
         )
     }
 
