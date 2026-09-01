@@ -329,14 +329,14 @@ extension MainWindowController: NSToolbarDelegate {
         case .toggleInspector:
             item.label = "Inspector"
             item.paletteLabel = "Toggle Inspector"
-            item.toolTip = "Show or hide the inspector"
+            item.toolTip = TooltipSurfacePolicy.assignableTooltip("Show or hide the inspector")
             item.image = NSImage(systemSymbolName: "sidebar.right", accessibilityDescription: "Toggle inspector")
             item.target = self
             item.action = #selector(toggleInspector(_:))
         case .exportBundle:
             item.label = "Export Logs"
             item.paletteLabel = "Export Support Bundle"
-            item.toolTip = "Export a support bundle"
+            item.toolTip = TooltipSurfacePolicy.assignableTooltip("Export a support bundle")
             item.image = NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export support bundle")
             item.target = self
             item.action = #selector(exportSupportBundle(_:))

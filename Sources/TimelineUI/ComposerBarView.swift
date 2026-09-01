@@ -132,7 +132,7 @@ final class ComposerAttachmentChipView: NSView {
 
     func configure(attachment: OutgoingMediaAttachment) {
         titleField.stringValue = attachment.filename
-        toolTip = attachment.filename
+        toolTip = TooltipSurfacePolicy.assignableTooltip(attachment.filename)
         let symbolName: String
         switch attachment.kind {
         case .image:
@@ -302,7 +302,7 @@ final class ComposerBarView: NSView, NSTextViewDelegate {
         if isJoined {
             membershipRow.isHidden = true
             textView.toolTip = nil
-            attachButton.toolTip = "Attach file"
+            attachButton.toolTip = TooltipSurfacePolicy.assignableTooltip("Attach file")
         } else if let summary {
             membershipRow.isHidden = false
             switch summary.membership {
@@ -320,14 +320,14 @@ final class ComposerBarView: NSView, NSTextViewDelegate {
             case .joined:
                 membershipRow.isHidden = true
             }
-            textView.toolTip = "Join this room before sending messages."
-            attachButton.toolTip = "Join this room before attaching files."
+            textView.toolTip = TooltipSurfacePolicy.assignableTooltip("Join this room before sending messages.")
+            attachButton.toolTip = TooltipSurfacePolicy.assignableTooltip("Join this room before attaching files.")
         } else {
             membershipRow.isHidden = false
             membershipField.stringValue = "Select a room to start chatting."
             joinButton.isHidden = true
             textView.toolTip = nil
-            attachButton.toolTip = "Attach file"
+            attachButton.toolTip = TooltipSurfacePolicy.assignableTooltip("Attach file")
         }
 
         if let notice, !notice.isEmpty {
@@ -438,7 +438,7 @@ final class ComposerBarView: NSView, NSTextViewDelegate {
         attachButton.isBordered = false
         attachButton.target = self
         attachButton.action = #selector(attachTapped)
-        attachButton.toolTip = "Attach file"
+        attachButton.toolTip = TooltipSurfacePolicy.assignableTooltip("Attach file")
         attachButton.setAccessibilityLabel("Attach file")
         attachButton.setAccessibilityRole(.button)
 

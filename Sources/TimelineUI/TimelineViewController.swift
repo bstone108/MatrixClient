@@ -76,7 +76,7 @@ final class ReceiptAvatarBadgeView: NSView {
         label.isHidden = false
         imageView.image = nil
         layer?.backgroundColor = backgroundColor.cgColor
-        self.toolTip = toolTip
+        self.toolTip = TooltipSurfacePolicy.assignableTooltip(toolTip)
     }
 
     func configure(
@@ -481,12 +481,14 @@ final class TimelineMediaCellView: NSTableCellView {
             let hasPreview = mediaState?.thumbnailFileURL != nil || mediaState?.originalFileURL != nil
             previewHeightConstraint?.constant = hasPreview ? Layout.imagePreviewHeight : Layout.compactPreviewHeight
             openButton.isHidden = true
-            previewButton.toolTip = mediaState?.originalFileURL == nil ? "Fetch and open original" : "Open original"
+            previewButton.toolTip = TooltipSurfacePolicy.assignableTooltip(
+                mediaState?.originalFileURL == nil ? "Fetch and open original" : "Open original"
+            )
         case .audio, .file, .none:
             previewHeightConstraint?.constant = Layout.compactPreviewHeight
             openButton.isHidden = false
             openButton.title = mediaState?.originalFileURL == nil ? "Fetch File" : "Open File"
-            previewButton.toolTip = openButton.title
+            previewButton.toolTip = TooltipSurfacePolicy.assignableTooltip(openButton.title)
         }
 
         configureProgress(mediaState)
@@ -1084,7 +1086,10 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             )
         )
         headerButton.setAccessibilityHelp(RoomHeaderExpansionPolicy.accessibilityHelp(canRevealSubtitle: canReveal))
-        headerButton.toolTip = summary?.roomID.rawValue
+        headerButton.toolTip = TooltipSurfacePolicy.roomHeaderTooltip(
+            roomID: summary?.roomID.rawValue,
+            help: RoomHeaderExpansionPolicy.accessibilityHelp(canRevealSubtitle: canReveal)
+        )
     }
 
     private func reloadSelection() {
@@ -1332,9 +1337,14 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func updateJumpToLatestButtonVisibility() {
-        jumpToLatestButton.isHidden = !liveFollow.shouldShowJumpToLatestControl(
+        let show = liveFollow.shouldShowJumpToLatestControl(
             hasItems: !state.timelineItems.isEmpty,
             isAtBottom: isScrolledToBottom()
+        )
+        jumpToLatestButton.isHidden = !show
+        jumpToLatestButton.toolTip = TooltipSurfacePolicy.tooltipIfVisible(
+            isHidden: !show,
+            raw: "Jump to latest messages"
         )
     }
 
@@ -1460,7 +1470,7 @@ private final class JumpToLatestButton: NSButton {
             NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
         )
         contentTintColor = .labelColor
-        toolTip = "Jump to latest messages"
+        toolTip = nil
         setAccessibilityLabel("Jump to latest messages")
         setAccessibilityRole(.button)
         setAccessibilityTitle("Jump to latest messages")

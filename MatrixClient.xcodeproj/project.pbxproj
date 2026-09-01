@@ -99,6 +99,8 @@
 		C33333333333333333333348 /* RoomListPresentationPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333338 /* RoomListPresentationPolicyTests.swift */; };
 		C33333333333333333333349 /* RoomHeaderExpansionPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C33333333333333333333339 /* RoomHeaderExpansionPolicy.swift */; };
 		C3333333333333333333334A /* RoomHeaderExpansionPolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3333333333333333333333A /* RoomHeaderExpansionPolicyTests.swift */; };
+		C3333333333333333333334B /* TooltipSurfacePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3333333333333333333333B /* TooltipSurfacePolicy.swift */; };
+		C3333333333333333333334C /* TooltipSurfacePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3333333333333333333333C /* TooltipSurfacePolicyTests.swift */; };
 		C7A29B6B7AD6E0652EB66216 /* Diagnostics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 5EC7E3AF880EA9C2B6446CC1 /* Diagnostics.framework */; };
 		C8DED00A1B883675B8C88630 /* Persistence.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4CD5B24A3D7FD395A804983B /* Persistence.framework */; };
 		CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903044045DB8284FCED08DC5 /* LoginViewController.swift */; };
@@ -356,6 +358,8 @@
 		C33333333333333333333338 /* RoomListPresentationPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomListPresentationPolicyTests.swift; sourceTree = "<group>"; };
 		C33333333333333333333339 /* RoomHeaderExpansionPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomHeaderExpansionPolicy.swift; sourceTree = "<group>"; };
 		C3333333333333333333333A /* RoomHeaderExpansionPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoomHeaderExpansionPolicyTests.swift; sourceTree = "<group>"; };
+		C3333333333333333333333B /* TooltipSurfacePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TooltipSurfacePolicy.swift; sourceTree = "<group>"; };
+		C3333333333333333333333C /* TooltipSurfacePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TooltipSurfacePolicyTests.swift; sourceTree = "<group>"; };
 		AB7F06E53E50CBC7FD363C98 /* SlidingSyncCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlidingSyncCoordinator.swift; sourceTree = "<group>"; };
 		AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveLoginSmokeTests.swift; sourceTree = "<group>"; };
 		B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimelineItemReconcilerTests.swift; sourceTree = "<group>"; };
@@ -488,6 +492,7 @@
 				C33333333333333333333336 /* WindowFramePolicyTests.swift */,
 				C33333333333333333333338 /* RoomListPresentationPolicyTests.swift */,
 				C3333333333333333333333A /* RoomHeaderExpansionPolicyTests.swift */,
+				C3333333333333333333333C /* TooltipSurfacePolicyTests.swift */,
 			);
 			path = MatrixCoreTests;
 			sourceTree = "<group>";
@@ -568,6 +573,7 @@
 				C33333333333333333333335 /* WindowFramePolicy.swift */,
 				C33333333333333333333337 /* RoomListPresentationPolicy.swift */,
 				C33333333333333333333339 /* RoomHeaderExpansionPolicy.swift */,
+				C3333333333333333333333B /* TooltipSurfacePolicy.swift */,
 				17992F0F606FCF0035B7D669 /* TimelineStore.swift */,
 			);
 			path = MatrixCore;
@@ -1042,6 +1048,7 @@
 				C33333333333333333333345 /* WindowFramePolicy.swift in Sources */,
 				C33333333333333333333347 /* RoomListPresentationPolicy.swift in Sources */,
 				C33333333333333333333349 /* RoomHeaderExpansionPolicy.swift in Sources */,
+				C3333333333333333333334B /* TooltipSurfacePolicy.swift in Sources */,
 				938A66D66241097ED9EE523E /* TimelineStore.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1069,6 +1076,7 @@
 				C33333333333333333333346 /* WindowFramePolicyTests.swift in Sources */,
 				C33333333333333333333348 /* RoomListPresentationPolicyTests.swift in Sources */,
 				C3333333333333333333334A /* RoomHeaderExpansionPolicyTests.swift in Sources */,
+				C3333333333333333333334C /* TooltipSurfacePolicyTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
