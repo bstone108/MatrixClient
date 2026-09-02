@@ -126,6 +126,29 @@ jobs:
       - name: Compile unsigned ${{ matrix.arch }} Release
         run: ./scripts/package-macos.sh --compile-only
 
+  test-macos:
+    name: Test macOS (arm64)
+    needs: gate
+    if: needs.gate.outputs.compile == '1'
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Run focused regressions and complete test suite
+        run: ./scripts/run-macos-tests.sh
+
+      - name: Upload macOS test logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: macos-test-logs
+          path: build/macos-test-logs
+          if-no-files-found: warn
+
   package-macos:
     name: Sign, notarize, and staple (${{ matrix.arch }})
     needs: gate

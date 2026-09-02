@@ -245,17 +245,19 @@ final class InspectorViewController: NSViewController {
             let snapshot = snapshots[index]
             let roomName = state.mediaWorkerRoomDisplayName(for: snapshot.roomID)
             field.stringValue = "\(snapshot.pendingCount) \(roomName)"
-            field.toolTip = [
-                snapshot.label,
-                snapshot.statusText,
-                roomName,
-                snapshot.itemID
-            ]
-            .compactMap { value in
-                guard let value, !value.isEmpty else { return nil }
-                return value
-            }
-            .joined(separator: " • ")
+            field.toolTip = TooltipSurfacePolicy.assignableTooltip(
+                [
+                    snapshot.label,
+                    snapshot.statusText,
+                    roomName,
+                    snapshot.itemID
+                ]
+                .compactMap { value in
+                    guard let value, !value.isEmpty else { return nil }
+                    return value
+                }
+                .joined(separator: " • ")
+            )
             field.textColor = snapshot.roomID == nil ? .tertiaryLabelColor : .secondaryLabelColor
         }
     }

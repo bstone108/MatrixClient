@@ -68,7 +68,7 @@ func wellKnownDiscoveryAndPasswordLoginConnectToLiveHomeserver() async throws {
         break
     case let .signedOut(message):
         throw LiveMatrixTestError.loginFailed(message ?? "The homeserver rejected the login.")
-    case .launching, .restoring, .signingIn:
+    case .launching, .restoring, .signingIn, .reconnecting:
         throw LiveMatrixTestError.unexpectedSessionState("Login did not reach a terminal state.")
     }
 
@@ -113,7 +113,7 @@ private func waitForSessionResolution(
                     if let message, !message.isEmpty {
                         return .signedOut(message: message)
                     }
-                case .launching, .restoring, .signingIn:
+                case .launching, .restoring, .signingIn, .reconnecting:
                     continue
                 }
             }

@@ -71,10 +71,16 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     }
 
     public var currentWindowTitle: String {
+        let base: String
         if let selectedSettingsDestination {
-            return selectedSettingsDestination.title
+            base = selectedSettingsDestination.title
+        } else {
+            base = selectedRoomSummary?.displayName ?? "Matrix Client"
         }
-        return selectedRoomSummary?.displayName ?? "Matrix Client"
+        if case .reconnecting = sessionState {
+            return "\(base) — Reconnecting"
+        }
+        return base
     }
 
     public init(
@@ -474,7 +480,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private func applySessionState(_ state: ClientSessionState) {
         sessionState = state
         switch state {
-        case .connected:
+        case .connected, .reconnecting:
             Task { [weak self] in
                 guard let self else { return }
                 await self.loadConnectedState()

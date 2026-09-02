@@ -76,7 +76,7 @@ struct MatrixLiveSmoke {
                 break
             case let .signedOut(message):
                 throw LiveSmokeError.loginFailed(message ?? "The homeserver rejected the login.")
-            case .launching, .restoring, .signingIn:
+            case .launching, .restoring, .signingIn, .reconnecting:
                 throw LiveSmokeError.unexpectedState("Login never reached a terminal state.")
             }
 
@@ -155,7 +155,7 @@ struct MatrixLiveSmoke {
                         if let message, !message.isEmpty {
                             return .signedOut(message: message)
                         }
-                    case .launching, .restoring, .signingIn:
+                    case .launching, .restoring, .signingIn, .reconnecting:
                         continue
                     }
                 }

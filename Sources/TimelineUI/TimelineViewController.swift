@@ -76,7 +76,7 @@ final class ReceiptAvatarBadgeView: NSView {
         label.isHidden = false
         imageView.image = nil
         layer?.backgroundColor = backgroundColor.cgColor
-        self.toolTip = toolTip
+        self.toolTip = TooltipSurfacePolicy.assignableTooltip(toolTip)
     }
 
     func configure(
@@ -481,12 +481,14 @@ final class TimelineMediaCellView: NSTableCellView {
             let hasPreview = mediaState?.thumbnailFileURL != nil || mediaState?.originalFileURL != nil
             previewHeightConstraint?.constant = hasPreview ? Layout.imagePreviewHeight : Layout.compactPreviewHeight
             openButton.isHidden = true
-            previewButton.toolTip = mediaState?.originalFileURL == nil ? "Fetch and open original" : "Open original"
+            previewButton.toolTip = TooltipSurfacePolicy.assignableTooltip(
+                mediaState?.originalFileURL == nil ? "Fetch and open original" : "Open original"
+            )
         case .audio, .file, .none:
             previewHeightConstraint?.constant = Layout.compactPreviewHeight
             openButton.isHidden = false
             openButton.title = mediaState?.originalFileURL == nil ? "Fetch File" : "Open File"
-            previewButton.toolTip = openButton.title
+            previewButton.toolTip = TooltipSurfacePolicy.assignableTooltip(openButton.title)
         }
 
         configureProgress(mediaState)
@@ -701,8 +703,9 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     private let state: any TimelineWorkspaceState
     private let videoPlaybackEngine: any VideoPlaybackEngine
-    private let titleField = NSTextField(labelWithString: "No Room Selected")
-    private let subtitleField = NSTextField(labelWithString: "")
+    private let headerButton = NSButton(title: "No Room Selected", target: nil, action: nil)
+    private let subtitleField = NSTextField(wrappingLabelWithString: "")
+    private var isRoomHeaderExpanded = RoomHeaderExpansionPolicy.defaultExpanded
     private let historyBannerField = NSTextField(labelWithString: "")
     private let emptyField = NSTextField(wrappingLabelWithString: "")
     private let tableView = NSTableView(frame: .zero)
@@ -716,6 +719,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private var pendingAttachments: [OutgoingMediaAttachment] = []
     private var didFocusComposerForCurrentRoom = false
     private var isRestoringScroll = false
+    private var scrollRestoreGeneration: UInt64 = 0
     private var paginationDebounceTask: Task<Void, Never>?
     private var liveFollow = TimelineLiveFollowPolicy()
     private var trackedRoomID: String?
@@ -739,9 +743,23 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             self?.enqueueAttachments(from: urls)
         }
 
-        titleField.font = .systemFont(ofSize: 18, weight: .semibold)
+        headerButton.font = .systemFont(ofSize: 18, weight: .semibold)
+        headerButton.bezelStyle = .inline
+        headerButton.isBordered = false
+        headerButton.alignment = .left
+        headerButton.imagePosition = .noImage
+        headerButton.target = self
+        headerButton.action = #selector(toggleRoomHeader)
+        headerButton.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        headerButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         subtitleField.font = .systemFont(ofSize: 12)
         subtitleField.textColor = .secondaryLabelColor
+        subtitleField.maximumNumberOfLines = 4
+        subtitleField.lineBreakMode = .byWordWrapping
+        subtitleField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        subtitleField.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        subtitleField.setContentHuggingPriority(.defaultLow, for: .vertical)
+        subtitleField.isHidden = true
         historyBannerField.font = .systemFont(ofSize: 11, weight: .medium)
         historyBannerField.textColor = .secondaryLabelColor
         historyBannerField.isHidden = true
@@ -751,10 +769,14 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         emptyField.maximumNumberOfLines = 0
         emptyField.isHidden = true
 
-        let headerStack = NSStackView(views: [titleField, subtitleField])
+        let headerStack = NSStackView(views: [headerButton, subtitleField])
         headerStack.orientation = .vertical
         headerStack.alignment = .leading
         headerStack.spacing = 2
+        headerStack.setContentHuggingPriority(.defaultHigh, for: .vertical)
+        headerStack.setHuggingPriority(.defaultHigh, for: .vertical)
+        let topicClick = NSClickGestureRecognizer(target: self, action: #selector(toggleRoomHeader))
+        subtitleField.addGestureRecognizer(topicClick)
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("timeline"))
         tableView.addTableColumn(column)
@@ -1035,31 +1057,52 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         focusComposerIfNeeded(force: true)
     }
 
+    @objc
+    private func toggleRoomHeader() {
+        guard state.selectedRoomSummary != nil else { return }
+        isRoomHeaderExpanded = RoomHeaderExpansionPolicy.expandedAfterToggle(isRoomHeaderExpanded)
+        applyRoomHeader()
+    }
+
+    private func applyRoomHeader() {
+        let summary = state.selectedRoomSummary
+        let roomName = summary?.displayName ?? "No Room Selected"
+        let subtitle = summary.map {
+            RoomHeaderExpansionPolicy.subtitle(for: $0.membership, topic: $0.topic)
+        } ?? ""
+        headerButton.title = roomName
+        subtitleField.stringValue = subtitle
+        subtitleField.isHidden = !RoomHeaderExpansionPolicy.showsSubtitle(
+            isExpanded: isRoomHeaderExpanded,
+            subtitle: subtitle
+        )
+        let canReveal = !subtitle.isEmpty
+        headerButton.setAccessibilityRole(.button)
+        headerButton.setAccessibilityLabel(
+            RoomHeaderExpansionPolicy.accessibilityLabel(
+                roomName: roomName,
+                isExpanded: isRoomHeaderExpanded,
+                canRevealSubtitle: canReveal
+            )
+        )
+        headerButton.setAccessibilityHelp(RoomHeaderExpansionPolicy.accessibilityHelp(canRevealSubtitle: canReveal))
+        headerButton.toolTip = TooltipSurfacePolicy.roomHeaderTooltip(
+            roomID: summary?.roomID.rawValue,
+            help: RoomHeaderExpansionPolicy.accessibilityHelp(canRevealSubtitle: canReveal)
+        )
+    }
+
     private func reloadSelection() {
-        let previousRoomID = titleField.toolTip
         if let summary = state.selectedRoomSummary {
-            titleField.stringValue = summary.displayName
-            switch summary.membership {
-            case .notJoined:
-                subtitleField.stringValue = summary.topic.isEmpty ? "Not joined" : "Not joined  •  \(summary.topic)"
-            case .invited:
-                subtitleField.stringValue = summary.topic.isEmpty ? "Invited" : "Invited  •  \(summary.topic)"
-            case .left:
-                subtitleField.stringValue = "You left this room"
-            case .joined:
-                subtitleField.stringValue = summary.topic
-            }
-            titleField.toolTip = summary.roomID.rawValue
-            if previousRoomID != summary.roomID.rawValue {
+            if trackedRoomID != summary.roomID.rawValue {
+                isRoomHeaderExpanded = RoomHeaderExpansionPolicy.expandedAfterRoomChange()
                 didFocusComposerForCurrentRoom = false
                 pendingAttachments = []
                 liveFollow.resetForSelectedRoomChange()
                 trackedRoomID = summary.roomID.rawValue
             }
         } else {
-            titleField.stringValue = "No Room Selected"
-            subtitleField.stringValue = ""
-            titleField.toolTip = nil
+            isRoomHeaderExpanded = RoomHeaderExpansionPolicy.expandedAfterRoomChange()
             didFocusComposerForCurrentRoom = false
             pendingAttachments = []
             if trackedRoomID != nil {
@@ -1067,7 +1110,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
                 trackedRoomID = nil
             }
         }
-        subtitleField.isHidden = subtitleField.stringValue.isEmpty
+        applyRoomHeader()
         if let root = view as? FileDropView {
             root.isDropEnabled = state.selectedRoomSummary?.membership == .joined
         }
@@ -1089,17 +1132,17 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     private func reloadTimeline() {
         let composerWasFirst = view.window?.firstResponder === composerBar.textView
+        let generation = beginScrollRestore()
         let anchor = currentScrollAnchor()
 
-        isRestoringScroll = true
         tableView.reloadData()
-        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<state.timelineItems.count))
+        if !state.timelineItems.isEmpty {
+            tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<state.timelineItems.count))
+        }
         tableView.layoutSubtreeIfNeeded()
         updateEmptyState()
         updateHistoryBanner()
-        restoreScrollAnchor(anchor)
-        isRestoringScroll = false
-        updateJumpToLatestButtonVisibility()
+        finishScrollRestore(anchor: anchor, generation: generation)
 
         if composerWasFirst {
             focusComposerIfNeeded(force: true)
@@ -1113,28 +1156,41 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         for (row, item) in state.timelineItems.enumerated() where item.media != nil {
             heightsNeedUpdate.insert(row)
         }
+
+        let generation: UInt64?
+        let anchor: TimelineScrollAnchor?
         if !heightsNeedUpdate.isEmpty {
+            generation = beginScrollRestore()
+            anchor = currentScrollAnchor()
             tableView.noteHeightOfRows(withIndexesChanged: heightsNeedUpdate)
+            tableView.layoutSubtreeIfNeeded()
+        } else {
+            generation = nil
+            anchor = nil
         }
 
         let visibleRect = scrollView.contentView.documentVisibleRect
         let rows = tableView.rows(in: visibleRect)
-        guard rows.location != NSNotFound, rows.length > 0 else { return }
+        if rows.location != NSNotFound, rows.length > 0 {
+            for row in rows.location..<(rows.location + rows.length) where tableView.numberOfRows > row {
+                let item = state.timelineItems[row]
+                guard item.media != nil else { continue }
+                guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineMediaCellView else {
+                    continue
+                }
+                cell.configure(
+                    item: item,
+                    mediaState: state.mediaState(for: item.id),
+                    avatarResolver: resolveReceiptAvatarFileURL
+                )
+                cell.onOpenRequested = { [weak self] in
+                    self?.openMedia(for: item)
+                }
+            }
+        }
 
-        for row in rows.location..<(rows.location + rows.length) where tableView.numberOfRows > row {
-            let item = state.timelineItems[row]
-            guard item.media != nil else { continue }
-            guard let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) as? TimelineMediaCellView else {
-                continue
-            }
-            cell.configure(
-                item: item,
-                mediaState: state.mediaState(for: item.id),
-                avatarResolver: resolveReceiptAvatarFileURL
-            )
-            cell.onOpenRequested = { [weak self] in
-                self?.openMedia(for: item)
-            }
+        if let generation, let anchor {
+            finishScrollRestore(anchor: anchor, generation: generation)
         }
     }
 
@@ -1156,10 +1212,12 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     @objc
     private func jumpToLatestMessages() {
         liveFollow.jumpToLatest()
-        isRestoringScroll = true
+        let generation = beginScrollRestore()
         scrollToBottom()
-        isRestoringScroll = false
-        updateJumpToLatestButtonVisibility()
+        finishScrollRestore(
+            anchor: TimelineScrollAnchor(pinToLatest: true, itemID: nil, offsetInRow: 0),
+            generation: generation
+        )
         scheduleMarkSelectedRoomAsRead()
     }
 
@@ -1184,43 +1242,81 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         }
     }
 
-    private func currentScrollAnchor() -> (isBottom: Bool, itemID: String?, offsetInViewport: CGFloat) {
+    private func beginScrollRestore() -> UInt64 {
+        isRestoringScroll = true
+        scrollRestoreGeneration += 1
+        return scrollRestoreGeneration
+    }
+
+    private func finishScrollRestore(anchor: TimelineScrollAnchor, generation: UInt64) {
+        restoreScrollAnchor(anchor)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.scrollRestoreGeneration == generation else { return }
+            self.restoreScrollAnchor(anchor)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.scrollRestoreGeneration == generation else { return }
+                self.restoreScrollAnchor(anchor)
+                self.isRestoringScroll = false
+                self.updateJumpToLatestButtonVisibility()
+            }
+        }
+    }
+
+    private func currentScrollAnchor() -> TimelineScrollAnchor {
         let roomID = state.selectedRoomSummary?.roomID.rawValue
         if trackedRoomID != roomID {
             trackedRoomID = roomID
             liveFollow.resetForSelectedRoomChange()
         }
-        if liveFollow.shouldPinViewportToLatestOnReload || state.timelineItems.isEmpty {
-            return (true, nil, 0)
-        }
         let visibleRect = scrollView.contentView.documentVisibleRect
         let rows = tableView.rows(in: visibleRect)
-        guard rows.location != NSNotFound, rows.length > 0,
-              state.timelineItems.indices.contains(rows.location) else {
-            return (false, nil, 0)
+        var itemID: String?
+        var rowMinY: CGFloat = 0
+        if rows.location != NSNotFound, rows.length > 0,
+           state.timelineItems.indices.contains(rows.location) {
+            itemID = state.timelineItems[rows.location].id
+            rowMinY = tableView.rect(ofRow: rows.location).minY
         }
-        let row = rows.location
-        let rowRect = tableView.rect(ofRow: row)
-        return (false, state.timelineItems[row].id, rowRect.minY - visibleRect.minY)
+        return TimelineScrollAnchor.capture(
+            isFollowingLatest: liveFollow.shouldPinViewportToLatestOnReload,
+            itemsEmpty: state.timelineItems.isEmpty,
+            firstVisibleItemID: itemID,
+            firstVisibleRowMinY: rowMinY,
+            visibleRectMinY: visibleRect.minY
+        )
     }
 
-    private func restoreScrollAnchor(_ anchor: (isBottom: Bool, itemID: String?, offsetInViewport: CGFloat)) {
-        if anchor.isBottom {
+    private func restoreScrollAnchor(_ anchor: TimelineScrollAnchor) {
+        tableView.layoutSubtreeIfNeeded()
+        if anchor.pinToLatest {
             scrollToBottom()
             scheduleMarkSelectedRoomAsRead()
             return
         }
-        guard let itemID = anchor.itemID,
-              let row = state.timelineItems.firstIndex(where: { $0.id == itemID }) else {
+
+        let rows = state.timelineItems.indices.map { index -> TimelineScrollRow in
+            let rect = tableView.rect(ofRow: index)
+            return TimelineScrollRow(
+                id: state.timelineItems[index].id,
+                minY: rect.minY,
+                height: rect.height
+            )
+        }
+        let clipView = scrollView.contentView
+        let documentHeight = max(
+            tableView.bounds.height,
+            clipView.documentView?.bounds.height ?? 0
+        )
+        guard let originY = anchor.targetOriginY(
+            rows: rows,
+            clipHeight: clipView.bounds.height,
+            documentHeight: documentHeight
+        ) else {
             return
         }
-        tableView.layoutSubtreeIfNeeded()
-        let rowRect = tableView.rect(ofRow: row)
-        let clipView = scrollView.contentView
+
         var origin = clipView.bounds.origin
-        origin.y = rowRect.minY - anchor.offsetInViewport
-        let maxOffset = max(0, tableView.bounds.height - clipView.bounds.height)
-        origin.y = min(max(origin.y, 0), maxOffset)
+        origin.y = originY
         clipView.scroll(to: origin)
         scrollView.reflectScrolledClipView(clipView)
     }
@@ -1241,9 +1337,15 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func updateJumpToLatestButtonVisibility() {
-        jumpToLatestButton.isHidden = !liveFollow.shouldShowJumpToLatestControl(
+        let show = liveFollow.shouldShowJumpToLatestControl(
             hasItems: !state.timelineItems.isEmpty,
             isAtBottom: isScrolledToBottom()
+        )
+        jumpToLatestButton.isHidden = !show
+        jumpToLatestButton.toolTip = TooltipSurfacePolicy.tooltipIfVisible(
+            isHidden: !show,
+            isZeroSized: jumpToLatestButton.bounds.width <= 0 || jumpToLatestButton.bounds.height <= 0,
+            raw: "Jump to latest messages"
         )
     }
 
@@ -1369,7 +1471,7 @@ private final class JumpToLatestButton: NSButton {
             NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
         )
         contentTintColor = .labelColor
-        toolTip = "Jump to latest messages"
+        toolTip = nil
         setAccessibilityLabel("Jump to latest messages")
         setAccessibilityRole(.button)
         setAccessibilityTitle("Jump to latest messages")
