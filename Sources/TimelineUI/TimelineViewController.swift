@@ -856,12 +856,16 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             object: scrollView.contentView,
             queue: .main
         ) { [weak self] _ in
-            let observedDuringRestore = self?.isRestoringScroll ?? false
-            let observedGeneration = self?.scrollRestoreCoordinator.currentGeneration
+            let observation = MainActor.assumeIsolated { [weak self] in
+                (
+                    self?.isRestoringScroll ?? false,
+                    self?.scrollRestoreCoordinator.currentGeneration
+                )
+            }
             Task { @MainActor [weak self] in
                 self?.handleTimelineScroll(
-                    observedDuringRestore: observedDuringRestore,
-                    observedGeneration: observedGeneration
+                    observedDuringRestore: observation.0,
+                    observedGeneration: observation.1
                 )
             }
         }
