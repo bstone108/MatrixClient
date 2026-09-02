@@ -21,6 +21,7 @@ private func isolatedDefaults() -> UserDefaults {
     return defaults
 }
 
+@MainActor
 private func makeTestWindow(frame: NSRect) -> NSWindow {
     let window = NSWindow(
         contentRect: NSRect(origin: .zero, size: frame.size),
@@ -33,6 +34,7 @@ private func makeTestWindow(frame: NSRect) -> NSWindow {
     return window
 }
 
+@MainActor
 private func isFullyOnAScreen(_ frame: NSRect) -> Bool {
     let screens = NSScreen.screens
     if screens.isEmpty {
@@ -62,6 +64,7 @@ private func makeMainWindowController() -> MainWindowController {
 }
 
 @Suite("MainWindowFrameIntegrationTests")
+@MainActor
 struct MainWindowFrameIntegrationTests {
 @Test
 @MainActor

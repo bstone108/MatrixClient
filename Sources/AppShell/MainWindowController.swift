@@ -3,8 +3,10 @@ import MatrixCore
 import MediaKit
 import TimelineUI
 
+@MainActor
 final class MainWindowController: NSWindowController {
 
+    @MainActor
     enum WindowPersistence {
         static let frameKey = "MainWindow.frame"
         static let inspectorCollapsedKey = "MainWindow.inspectorCollapsed"

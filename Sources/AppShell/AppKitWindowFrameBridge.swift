@@ -3,20 +3,22 @@ import MatrixCore
 
 /// Converts and applies window frames without `NSRect(CGRect)` / `CGRect(NSRect)`,
 /// which Swift parses as `Decodable.init(from:)` because the types are aliases.
+/// AppKit window/screen reads and writes stay on the main actor.
+@MainActor
 enum AppKitWindowFrameBridge {
-    static func policyRect(_ rect: NSRect) -> CGRect {
+    nonisolated static func policyRect(_ rect: NSRect) -> CGRect {
         CGRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
     }
 
-    static func windowRect(_ rect: CGRect) -> NSRect {
+    nonisolated static func windowRect(_ rect: CGRect) -> NSRect {
         NSRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
     }
 
-    static func policySize(_ size: NSSize) -> CGSize {
+    nonisolated static func policySize(_ size: NSSize) -> CGSize {
         CGSize(width: size.width, height: size.height)
     }
 
-    static func windowSize(_ size: CGSize) -> NSSize {
+    nonisolated static func windowSize(_ size: CGSize) -> NSSize {
         NSSize(width: size.width, height: size.height)
     }
 
@@ -34,7 +36,7 @@ enum AppKitWindowFrameBridge {
         return visibleFrames(of: screens).first ?? policyRect(NSScreen.main?.visibleFrame ?? .zero)
     }
 
-    static func resolvedWindowFrame(
+    nonisolated static func resolvedWindowFrame(
         current: NSRect,
         proposed: NSRect,
         visibleFrame: CGRect,
@@ -71,7 +73,7 @@ enum AppKitWindowFrameBridge {
         return window.frame
     }
 
-    static func sizeAfterWillResize(
+    nonisolated static func sizeAfterWillResize(
         current: NSRect,
         proposedSize: NSSize,
         visibleFrame: CGRect,
