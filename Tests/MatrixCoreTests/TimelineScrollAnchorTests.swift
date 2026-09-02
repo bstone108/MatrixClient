@@ -2,6 +2,8 @@ import Foundation
 import MatrixCore
 import Testing
 
+@Suite("TimelineScrollAnchorTests")
+struct TimelineScrollAnchorTests {
 @Test
 func liveAppendWhileReadingHistoryKeepsAnchoredItemOffset() {
     var follow = TimelineLiveFollowPolicy()
@@ -125,4 +127,5 @@ func missingAnchorItemDoesNotYankViewport() {
         documentHeight: 400
     )
     #expect(origin == nil)
+}
 }

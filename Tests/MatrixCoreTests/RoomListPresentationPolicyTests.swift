@@ -25,6 +25,8 @@ private func room(
     )
 }
 
+@Suite("RoomListPresentationPolicyTests")
+struct RoomListPresentationPolicyTests {
 @Test
 func unreadCountIsRenderedOnTheRoomNameWithAccessibleLabel() {
     let unread = room(id: "!a", name: "General", unread: 3, timestamp: Date(timeIntervalSince1970: 20))
@@ -105,4 +107,5 @@ func invitesStayFirstAndSpaceSectionTitlesArePreserved() {
     #expect(sections[0].rooms.map(\.displayName) == ["New Team"])
     #expect(sections[1].rooms.map(\.displayName) == ["Standup"])
     #expect(RoomListPresentationPolicy.accessibilityLabel(for: invite) == "New Team, invited")
+}
 }

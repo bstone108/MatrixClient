@@ -5,10 +5,12 @@ import TimelineUI
 
 final class MainWindowController: NSWindowController {
 
-    private enum WindowPersistence {
+    enum WindowPersistence {
         static let frameKey = "MainWindow.frame"
         static let inspectorCollapsedKey = "MainWindow.inspectorCollapsed"
-        static let splitAutosaveName = "MatrixClient.MainSplitView"
+        static var splitAutosaveName = "MatrixClient.MainSplitView"
+        static var defaults: UserDefaults = .standard
+        static var skipDeferredFrameRestore = false
     }
 
     private let state: WorkspaceStateController
@@ -45,6 +47,16 @@ final class MainWindowController: NSWindowController {
         updatePresentation()
         applyResolvedFrame(reason: .recovery, proposed: window.frame)
         scheduleLockedFrameRestore(reason: .recovery)
+    }
+
+    var testingLastValidUserFrame: NSRect? { lastValidUserFrame }
+
+    func applyResolvedFrameForTesting(
+        reason: WindowFrameAdjustmentReason,
+        proposed: NSRect,
+        currentOverride: NSRect? = nil
+    ) {
+        applyResolvedFrame(reason: reason, proposed: proposed, currentOverride: currentOverride)
     }
 
     required init?(coder: NSCoder) {
@@ -95,14 +107,14 @@ final class MainWindowController: NSWindowController {
 
     private func persistInspectorCollapsedState() {
         guard let inspectorItem else { return }
-        UserDefaults.standard.set(inspectorItem.isCollapsed, forKey: WindowPersistence.inspectorCollapsedKey)
+        WindowPersistence.defaults.set(inspectorItem.isCollapsed, forKey: WindowPersistence.inspectorCollapsedKey)
     }
 
     private func persistedInspectorCollapsed() -> Bool {
-        if UserDefaults.standard.object(forKey: WindowPersistence.inspectorCollapsedKey) == nil {
+        if WindowPersistence.defaults.object(forKey: WindowPersistence.inspectorCollapsedKey) == nil {
             return true
         }
-        return UserDefaults.standard.bool(forKey: WindowPersistence.inspectorCollapsedKey)
+        return WindowPersistence.defaults.bool(forKey: WindowPersistence.inspectorCollapsedKey)
     }
 
     private func buildWorkspaceUI() {
@@ -187,6 +199,10 @@ final class MainWindowController: NSWindowController {
 
     private func scheduleLockedFrameRestore(reason: WindowFrameAdjustmentReason) {
         let locked = lastValidUserFrame ?? window?.frame
+        if WindowPersistence.skipDeferredFrameRestore {
+            isRestoringInitialFrame = false
+            return
+        }
         frameStabilizationTask?.cancel()
         frameStabilizationTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(50))
@@ -206,19 +222,17 @@ final class MainWindowController: NSWindowController {
         guard let window else { return }
         applyWindowSizeLimits()
         let current = currentOverride ?? lastValidUserFrame ?? window.frame
-        let resolved = AppKitRectBridge.windowRect(
-            WindowFramePolicy.resolvedFrame(
-                current: AppKitRectBridge.policyRect(current),
-                proposed: AppKitRectBridge.policyRect(proposed),
-                visibleFrame: currentVisibleFrame(for: current),
-                reason: reason
-            )
+        let resolved = AppKitWindowFrameBridge.resolvedWindowFrame(
+            current: current,
+            proposed: proposed,
+            visibleFrame: currentVisibleFrame(for: current),
+            reason: reason
         )
         if !window.frame.equalTo(resolved) {
             applyManagedFrame(resolved, display: window.isVisible)
         }
         if WindowFramePolicy.shouldPreserveCurrentFrame(
-            AppKitRectBridge.policyRect(resolved),
+            AppKitWindowFrameBridge.policyRect(resolved),
             in: currentVisibleFrame(for: resolved)
         ) {
             rememberValidUserFrame(resolved)
@@ -226,7 +240,7 @@ final class MainWindowController: NSWindowController {
     }
 
     private func persistedWindowFrame() -> NSRect? {
-        guard let frameString = UserDefaults.standard.string(forKey: WindowPersistence.frameKey) else { return nil }
+        guard let frameString = WindowPersistence.defaults.string(forKey: WindowPersistence.frameKey) else { return nil }
         let frame = NSRectFromString(frameString)
         guard frame.width > 0, frame.height > 0 else { return nil }
         return frame
@@ -237,15 +251,13 @@ final class MainWindowController: NSWindowController {
         guard !isApplyingManagedFrame else { return }
         guard !isRestoringInitialFrame else { return }
         guard window.isVisible, !window.isMiniaturized, !window.styleMask.contains(.fullScreen) else { return }
-        let resolved = AppKitRectBridge.windowRect(
-            WindowFramePolicy.resolvedFrame(
-                current: AppKitRectBridge.policyRect(lastValidUserFrame ?? window.frame),
-                proposed: AppKitRectBridge.policyRect(window.frame),
-                visibleFrame: currentVisibleFrame(),
-                reason: .userInteraction
-            )
+        let resolved = AppKitWindowFrameBridge.resolvedWindowFrame(
+            current: lastValidUserFrame ?? window.frame,
+            proposed: window.frame,
+            visibleFrame: currentVisibleFrame(),
+            reason: .userInteraction
         )
-        UserDefaults.standard.set(NSStringFromRect(resolved), forKey: WindowPersistence.frameKey)
+        WindowPersistence.defaults.set(NSStringFromRect(resolved), forKey: WindowPersistence.frameKey)
     }
 
     private func applyManagedFrame(_ frame: NSRect, display: Bool) {
@@ -286,15 +298,8 @@ final class MainWindowController: NSWindowController {
     }
 
     private func currentVisibleFrame(for frame: NSRect? = nil) -> CGRect {
-        let screens = NSScreen.screens.map { AppKitRectBridge.policyRect($0.visibleFrame) }
         let reference = frame ?? window?.frame ?? .zero
-        if let visible = WindowFramePolicy.visibleFrame(
-            containing: AppKitRectBridge.policyRect(reference),
-            screens: screens
-        ) {
-            return visible
-        }
-        return screens.first ?? AppKitRectBridge.policyRect(NSScreen.main?.visibleFrame ?? .zero)
+        return AppKitWindowFrameBridge.visibleFrame(containing: reference, screens: NSScreen.screens)
     }
 
     private func updatePresentation() {
@@ -356,22 +361,12 @@ extension MainWindowController: NSToolbarDelegate {
 extension MainWindowController: NSWindowDelegate {
     func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
         let visible = currentVisibleFrame()
-        if isApplyingManagedFrame || isUserLiveResizing {
-            let resolved = WindowFramePolicy.resolvedFrame(
-                current: AppKitRectBridge.policyRect(lastValidUserFrame ?? sender.frame),
-                proposed: CGRect(origin: sender.frame.origin, size: CGSize(width: frameSize.width, height: frameSize.height)),
-                visibleFrame: visible,
-                reason: .userInteraction
-            )
-            return NSSize(width: resolved.width, height: resolved.height)
-        }
-        let locked = WindowFramePolicy.resolvedFrame(
-            current: AppKitRectBridge.policyRect(lastValidUserFrame ?? sender.frame),
-            proposed: CGRect(origin: sender.frame.origin, size: CGSize(width: frameSize.width, height: frameSize.height)),
+        return AppKitWindowFrameBridge.sizeAfterWillResize(
+            current: lastValidUserFrame ?? sender.frame,
+            proposedSize: frameSize,
             visibleFrame: visible,
-            reason: .textLayout
+            isUserDriven: isApplyingManagedFrame || isUserLiveResizing
         )
-        return NSSize(width: locked.width, height: locked.height)
     }
 
     func windowWillStartLiveResize(_ notification: Notification) {
@@ -424,18 +419,6 @@ extension MainWindowController: NSWindowDelegate {
         applyResolvedFrame(reason: .userInteraction, proposed: window?.frame ?? .zero)
         rememberValidUserFrame(window?.frame)
         saveWindowFrame()
-    }
-}
-
-private enum AppKitRectBridge {
-    /// `NSRect` is a `CGRect` alias on Apple platforms, so `CGRect(nsRect)` /
-    /// `NSRect(cgRect)` is parsed as `Decodable.init(from:)` and fails to compile.
-    static func policyRect(_ rect: NSRect) -> CGRect {
-        CGRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
-    }
-
-    static func windowRect(_ rect: CGRect) -> NSRect {
-        NSRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
     }
 }
 

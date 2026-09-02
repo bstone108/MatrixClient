@@ -8,6 +8,8 @@ private let sampleRecord = SavedSessionRecord(
     homeserverURL: "https://example.org"
 )
 
+@Suite("SavedSessionRestorePolicyTests")
+struct SavedSessionRestorePolicyTests {
 @Test
 func offlineSavedSessionStartupBecomesUsableWithoutDeletingDurableData() {
     let plan = SavedSessionRestorePolicy.startupPlan(persistedSessions: [sampleRecord])
@@ -123,4 +125,5 @@ func reconnectBackoffIsBounded() {
     #expect(delays[4] == 30)
     #expect(delays[11] == SavedSessionRestorePolicy.maxRetryDelay)
     #expect(delays.allSatisfy { $0 <= SavedSessionRestorePolicy.maxRetryDelay })
+}
 }

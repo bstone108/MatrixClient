@@ -16,6 +16,8 @@ private let contentReasons: [WindowFrameAdjustmentReason] = [
     .textLayout
 ]
 
+@Suite("WindowFramePolicyTests")
+struct WindowFramePolicyTests {
 @Test
 func validUserFrameIsPreservedExactly() {
     let sanitized = WindowFramePolicy.sanitizedFrame(user, visibleFrame: display, centerIfNeeded: true)
@@ -170,4 +172,5 @@ func windowLimitsNeverExceedTheVisibleDisplay() {
     #expect(minimum.height <= tiny.height)
     #expect(maximum.width == tiny.width)
     #expect(maximum.height == tiny.height)
+}
 }

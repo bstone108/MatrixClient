@@ -2,6 +2,8 @@ import Foundation
 import MatrixCore
 import Testing
 
+@Suite("RoomHeaderExpansionPolicyTests")
+struct RoomHeaderExpansionPolicyTests {
 @Test
 func roomHeaderStartsCollapsedAndHidesTheTopic() {
     #expect(RoomHeaderExpansionPolicy.defaultExpanded == false)
@@ -65,4 +67,5 @@ func membershipStatusIsTheExpandedSubtitleAndStaysHiddenWhileCollapsed() {
     #expect(invited == "Invited  •  Welcome")
     #expect(!RoomHeaderExpansionPolicy.showsSubtitle(isExpanded: false, subtitle: invited))
     #expect(RoomHeaderExpansionPolicy.showsSubtitle(isExpanded: true, subtitle: invited))
+}
 }

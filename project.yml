@@ -185,6 +185,20 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
+  AppShellTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Tests/AppShellTests
+    dependencies:
+      - target: AppShell
+      - target: MatrixCore
+      - target: MediaKit
+      - target: Diagnostics
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   MatrixClient:
     build:
@@ -194,6 +208,7 @@ schemes:
       targets:
         - MatrixCoreTests
         - PersistenceTests
+        - AppShellTests
   MatrixLiveSmoke:
     build:
       targets:

@@ -113,6 +113,7 @@
 		DFD1723297B94E9E077623C1 /* LiveLoginSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD666A451C50FAF1E4A4E6A8 /* LiveLoginSmokeTests.swift */; };
 		E357D0CDBDD047E680482BA3 /* TimelineItemReconcilerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B3255AF0EF67E1E12AAEBA5A /* TimelineItemReconcilerTests.swift */; };
 		E6A85A2F5E82E2F1519F6EC8 /* MainWindowController.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */; };
+		D44444444444444444444411 /* AppKitWindowFrameBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D44444444444444444444401 /* AppKitWindowFrameBridge.swift */; };
 		EEC85F734E5986E1FF3098C7 /* SlidingSyncCoordinatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB75C3F75478352F892E6FD8 /* SlidingSyncCoordinatorTests.swift */; };
 		F0134873874E1BEBDEF5426F /* QueuedMessageRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A5F150756BBD55DA0A5F5E7 /* QueuedMessageRecord.swift */; };
 		F04877FE6D958ECF825592DD /* MatrixRustSDK+Concurrency.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57FEEDFDADE3926D1D9EACF8 /* MatrixRustSDK+Concurrency.swift */; };
@@ -375,6 +376,7 @@
 		E054ADCA7EDFC055DC02C959 /* AsyncBroadcaster.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsyncBroadcaster.swift; sourceTree = "<group>"; };
 		E62148665ED867021A3AC703 /* AccountSessionActor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountSessionActor.swift; sourceTree = "<group>"; };
 		ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowController.swift; sourceTree = "<group>"; };
+		D44444444444444444444401 /* AppKitWindowFrameBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppKitWindowFrameBridge.swift; sourceTree = "<group>"; };
 		F2812A99A962CA56DCB10869 /* MatrixClient.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MatrixClient.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		F4F349D275504363DA0F16C5 /* MatrixClientFacade.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MatrixClientFacade.swift; sourceTree = "<group>"; };
 		FB38A79F3BBDA97B951F6412 /* QueuedMessageRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QueuedMessageRepositoryTests.swift; sourceTree = "<group>"; };
@@ -650,6 +652,7 @@
 				C20F6E9DCB5F14B793586751 /* ContentHostViewController.swift */,
 				0C43AB1A8B73A14B988327B6 /* InspectorViewController.swift */,
 				903044045DB8284FCED08DC5 /* LoginViewController.swift */,
+				D44444444444444444444401 /* AppKitWindowFrameBridge.swift */,
 				ED859E5221CAA3DD1E2665B3 /* MainWindowController.swift */,
 				C86FEB588F4B1D1DBB0DAB40 /* MatrixApplicationDelegate.swift */,
 				8BE2F7BA626C5FBE62057A29 /* NotificationController.swift */,
@@ -993,6 +996,7 @@
 				2449CD30F19368D1707801F5 /* ContentHostViewController.swift in Sources */,
 				338030CC065BBD7320733D82 /* InspectorViewController.swift in Sources */,
 				CFF5550DA636076D31665E12 /* LoginViewController.swift in Sources */,
+				D44444444444444444444411 /* AppKitWindowFrameBridge.swift in Sources */,
 				E6A85A2F5E82E2F1519F6EC8 /* MainWindowController.swift in Sources */,
 				2385CBBDCA5CC2359C04778D /* MatrixApplicationDelegate.swift in Sources */,
 				DFADC1951A7DFFB0B5FF4A43 /* NotificationController.swift in Sources */,
