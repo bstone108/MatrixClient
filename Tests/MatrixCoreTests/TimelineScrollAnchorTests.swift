@@ -61,9 +61,13 @@ func olderHistoryInsertionKeepsViewportOnTheSameMessage() {
         TimelineScrollRow(id: "$older-a", minY: 0, height: 90),
         TimelineScrollRow(id: "$older-b", minY: 90, height: 90),
         TimelineScrollRow(id: "$visible", minY: 300, height: 80),
-        TimelineScrollRow(id: "$latest", minY: 380, height: 80)
+        TimelineScrollRow(id: "$latest", minY: 380, height: 80),
+        // Keep enough real document content below the anchor for the requested
+        // viewport origin. The previous fixture claimed a 280pt origin in a
+        // 460pt document with a 200pt clip view, where 260pt is the hard max.
+        TimelineScrollRow(id: "$after-latest", minY: 460, height: 20)
     ]
-    let origin = anchor.targetOriginY(rows: prepended, clipHeight: 200, documentHeight: 460)
+    let origin = anchor.targetOriginY(rows: prepended, clipHeight: 200, documentHeight: 480)
     #expect(origin == 280)
 }
 
@@ -100,16 +104,18 @@ func repeatedReloadsKeepTheSameAnchoredOrigin() {
     let firstReload = [
         TimelineScrollRow(id: "$older", minY: 0, height: 80),
         TimelineScrollRow(id: "$keep", minY: 240, height: 80),
-        TimelineScrollRow(id: "$latest", minY: 320, height: 80)
+        TimelineScrollRow(id: "$latest", minY: 320, height: 80),
+        TimelineScrollRow(id: "$after-latest", minY: 400, height: 20)
     ]
     let secondReload = [
         TimelineScrollRow(id: "$older-a", minY: 0, height: 90),
         TimelineScrollRow(id: "$older-b", minY: 90, height: 90),
         TimelineScrollRow(id: "$keep", minY: 360, height: 80),
-        TimelineScrollRow(id: "$live", minY: 440, height: 80)
+        TimelineScrollRow(id: "$live", minY: 440, height: 80),
+        TimelineScrollRow(id: "$after-live", minY: 520, height: 20)
     ]
-    let firstOrigin = anchor.targetOriginY(rows: firstReload, clipHeight: 200, documentHeight: 400)
-    let secondOrigin = anchor.targetOriginY(rows: secondReload, clipHeight: 200, documentHeight: 520)
+    let firstOrigin = anchor.targetOriginY(rows: firstReload, clipHeight: 200, documentHeight: 420)
+    let secondOrigin = anchor.targetOriginY(rows: secondReload, clipHeight: 200, documentHeight: 540)
     #expect(firstOrigin == 220)
     #expect(secondOrigin == 340)
 }
