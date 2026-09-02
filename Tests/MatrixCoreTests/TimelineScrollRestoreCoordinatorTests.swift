@@ -13,34 +13,39 @@ struct TimelineScrollRestoreCoordinatorTests {
     @Test
     func statusAndProgressUpdatesDoNotCompeteWithAnInFlightTimelineRestore() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
-        let timeline = try #require(coordinator.begin(
+        let timelineOptional = coordinator.begin(
             mutation: .timelineItemsChanged,
             capturedAnchor: readerAnchor
-        ))
+        )
+        let timeline = try #require(timelineOptional)
 
-        #expect(coordinator.begin(
+        let historyStatusRequest = coordinator.begin(
             mutation: .historyStatusOnly,
             capturedAnchor: readerAnchor
-        ) == nil)
-        #expect(coordinator.begin(
+        )
+        #expect(historyStatusRequest == nil)
+        let mediaProgressRequest = coordinator.begin(
             mutation: .mediaProgressOnly,
             capturedAnchor: readerAnchor
-        ) == nil)
+        )
+        #expect(mediaProgressRequest == nil)
         #expect(coordinator.mayApply(timeline))
     }
 
     @Test
     func newerGeometryChangeSupersedesEarlierDeferredRestoreButKeepsOriginalAnchor() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
-        let history = try #require(coordinator.begin(
+        let historyOptional = coordinator.begin(
             mutation: .timelineItemsChanged,
             capturedAnchor: readerAnchor
-        ))
+        )
+        let history = try #require(historyOptional)
 
-        let media = try #require(coordinator.begin(
+        let mediaOptional = coordinator.begin(
             mutation: .mediaRowHeightsChanged,
             capturedAnchor: TimelineScrollAnchor(pinToLatest: true, itemID: nil, offsetInRow: 0)
-        ))
+        )
+        let media = try #require(mediaOptional)
 
         #expect(!coordinator.mayApply(history))
         #expect(coordinator.mayApply(media))
@@ -50,17 +55,20 @@ struct TimelineScrollRestoreCoordinatorTests {
     @Test
     func completingLatestRestoreReleasesTheAnchorForTheNextUserVisibleMutation() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
-        let first = try #require(coordinator.begin(
+        let firstOptional = coordinator.begin(
             mutation: .timelineItemsChanged,
             capturedAnchor: readerAnchor
-        ))
-        #expect(coordinator.complete(first))
+        )
+        let first = try #require(firstOptional)
+        let didComplete = coordinator.complete(first)
+        #expect(didComplete)
 
         let latestAnchor = TimelineScrollAnchor(pinToLatest: true, itemID: nil, offsetInRow: 0)
-        let next = try #require(coordinator.begin(
+        let nextOptional = coordinator.begin(
             mutation: .timelineItemsChanged,
             capturedAnchor: latestAnchor
-        ))
+        )
+        let next = try #require(nextOptional)
         #expect(next.anchor == latestAnchor)
     }
 }
