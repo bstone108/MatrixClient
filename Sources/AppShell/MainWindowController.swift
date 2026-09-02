@@ -206,10 +206,10 @@ final class MainWindowController: NSWindowController {
         guard let window else { return }
         applyWindowSizeLimits()
         let current = currentOverride ?? lastValidUserFrame ?? window.frame
-        let resolved = NSRect(
+        let resolved = AppKitRectBridge.windowRect(
             WindowFramePolicy.resolvedFrame(
-                current: CGRect(current),
-                proposed: CGRect(proposed),
+                current: AppKitRectBridge.policyRect(current),
+                proposed: AppKitRectBridge.policyRect(proposed),
                 visibleFrame: currentVisibleFrame(for: current),
                 reason: reason
             )
@@ -217,7 +217,10 @@ final class MainWindowController: NSWindowController {
         if !window.frame.equalTo(resolved) {
             applyManagedFrame(resolved, display: window.isVisible)
         }
-        if WindowFramePolicy.shouldPreserveCurrentFrame(CGRect(resolved), in: currentVisibleFrame(for: resolved)) {
+        if WindowFramePolicy.shouldPreserveCurrentFrame(
+            AppKitRectBridge.policyRect(resolved),
+            in: currentVisibleFrame(for: resolved)
+        ) {
             rememberValidUserFrame(resolved)
         }
     }
@@ -234,10 +237,10 @@ final class MainWindowController: NSWindowController {
         guard !isApplyingManagedFrame else { return }
         guard !isRestoringInitialFrame else { return }
         guard window.isVisible, !window.isMiniaturized, !window.styleMask.contains(.fullScreen) else { return }
-        let resolved = NSRect(
+        let resolved = AppKitRectBridge.windowRect(
             WindowFramePolicy.resolvedFrame(
-                current: CGRect(lastValidUserFrame ?? window.frame),
-                proposed: CGRect(window.frame),
+                current: AppKitRectBridge.policyRect(lastValidUserFrame ?? window.frame),
+                proposed: AppKitRectBridge.policyRect(window.frame),
                 visibleFrame: currentVisibleFrame(),
                 reason: .userInteraction
             )
@@ -283,12 +286,15 @@ final class MainWindowController: NSWindowController {
     }
 
     private func currentVisibleFrame(for frame: NSRect? = nil) -> CGRect {
-        let screens = NSScreen.screens.map { CGRect($0.visibleFrame) }
+        let screens = NSScreen.screens.map { AppKitRectBridge.policyRect($0.visibleFrame) }
         let reference = frame ?? window?.frame ?? .zero
-        if let visible = WindowFramePolicy.visibleFrame(containing: CGRect(reference), screens: screens) {
+        if let visible = WindowFramePolicy.visibleFrame(
+            containing: AppKitRectBridge.policyRect(reference),
+            screens: screens
+        ) {
             return visible
         }
-        return screens.first ?? CGRect(NSScreen.main?.visibleFrame ?? .zero)
+        return screens.first ?? AppKitRectBridge.policyRect(NSScreen.main?.visibleFrame ?? .zero)
     }
 
     private func updatePresentation() {
@@ -352,7 +358,7 @@ extension MainWindowController: NSWindowDelegate {
         let visible = currentVisibleFrame()
         if isApplyingManagedFrame || isUserLiveResizing {
             let resolved = WindowFramePolicy.resolvedFrame(
-                current: CGRect(lastValidUserFrame ?? sender.frame),
+                current: AppKitRectBridge.policyRect(lastValidUserFrame ?? sender.frame),
                 proposed: CGRect(origin: sender.frame.origin, size: CGSize(width: frameSize.width, height: frameSize.height)),
                 visibleFrame: visible,
                 reason: .userInteraction
@@ -360,7 +366,7 @@ extension MainWindowController: NSWindowDelegate {
             return NSSize(width: resolved.width, height: resolved.height)
         }
         let locked = WindowFramePolicy.resolvedFrame(
-            current: CGRect(lastValidUserFrame ?? sender.frame),
+            current: AppKitRectBridge.policyRect(lastValidUserFrame ?? sender.frame),
             proposed: CGRect(origin: sender.frame.origin, size: CGSize(width: frameSize.width, height: frameSize.height)),
             visibleFrame: visible,
             reason: .textLayout
@@ -418,6 +424,18 @@ extension MainWindowController: NSWindowDelegate {
         applyResolvedFrame(reason: .userInteraction, proposed: window?.frame ?? .zero)
         rememberValidUserFrame(window?.frame)
         saveWindowFrame()
+    }
+}
+
+private enum AppKitRectBridge {
+    /// `NSRect` is a `CGRect` alias on Apple platforms, so `CGRect(nsRect)` /
+    /// `NSRect(cgRect)` is parsed as `Decodable.init(from:)` and fails to compile.
+    static func policyRect(_ rect: NSRect) -> CGRect {
+        CGRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
+    }
+
+    static func windowRect(_ rect: CGRect) -> NSRect {
+        NSRect(x: rect.origin.x, y: rect.origin.y, width: rect.size.width, height: rect.size.height)
     }
 }
 
