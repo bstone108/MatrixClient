@@ -47,6 +47,7 @@ FOCUSED_CMD=(
   "${COMMON[@]}"
   -only-testing:MatrixCoreTests/SavedSessionRestorePolicyTests
   -only-testing:MatrixCoreTests/TimelineScrollAnchorTests
+  -only-testing:MatrixCoreTests/TimelineScrollRestoreCoordinatorTests
   -only-testing:MatrixCoreTests/RoomListPresentationPolicyTests
   -only-testing:MatrixCoreTests/RoomHeaderExpansionPolicyTests
   -only-testing:MatrixCoreTests/WindowFramePolicyTests
