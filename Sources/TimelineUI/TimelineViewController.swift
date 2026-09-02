@@ -1112,6 +1112,14 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         )
     }
 
+    private func resetTimelineViewportForRoomChange() {
+        scrollRestoreCoordinator.reset()
+        isRestoringScroll = false
+        mediaPreviewAvailabilityByItemID = [:]
+        paginationDebounceTask?.cancel()
+        paginationDebounceTask = nil
+    }
+
     private func reloadSelection() {
         if let summary = state.selectedRoomSummary {
             if trackedRoomID != summary.roomID.rawValue {
@@ -1119,6 +1127,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
                 didFocusComposerForCurrentRoom = false
                 pendingAttachments = []
                 liveFollow.resetForSelectedRoomChange()
+                resetTimelineViewportForRoomChange()
                 trackedRoomID = summary.roomID.rawValue
             }
         } else {
@@ -1127,6 +1136,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             pendingAttachments = []
             if trackedRoomID != nil {
                 liveFollow.resetForSelectedRoomChange()
+                resetTimelineViewportForRoomChange()
                 trackedRoomID = nil
             }
         }

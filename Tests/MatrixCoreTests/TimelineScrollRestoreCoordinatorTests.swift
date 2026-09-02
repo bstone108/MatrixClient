@@ -53,6 +53,29 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func roomChangeInvalidatesPendingAnchorBeforeTheNextRoomBeginsItsRestore() throws {
+        var coordinator = TimelineScrollRestoreCoordinator()
+        let roomAOptional = coordinator.begin(
+            mutation: .timelineItemsChanged,
+            capturedAnchor: readerAnchor
+        )
+        let roomARequest = try #require(roomAOptional)
+
+        coordinator.reset()
+
+        let roomBAnchor = TimelineScrollAnchor(pinToLatest: true, itemID: nil, offsetInRow: 0)
+        let roomBOptional = coordinator.begin(
+            mutation: .timelineItemsChanged,
+            capturedAnchor: roomBAnchor
+        )
+        let roomBRequest = try #require(roomBOptional)
+
+        #expect(!coordinator.mayApply(roomARequest))
+        #expect(coordinator.mayApply(roomBRequest))
+        #expect(roomBRequest.anchor == roomBAnchor)
+    }
+
+    @Test
     func completingLatestRestoreReleasesTheAnchorForTheNextUserVisibleMutation() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
         let firstOptional = coordinator.begin(
