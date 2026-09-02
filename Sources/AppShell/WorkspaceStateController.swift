@@ -22,6 +22,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
     private var sidebarObservers: [UUID: @MainActor () -> Void] = [:]
     private var roomListObservers: [UUID: @MainActor () -> Void] = [:]
     private var timelineObservers: [UUID: @MainActor () -> Void] = [:]
+    private var timelineHistoryObservers: [UUID: @MainActor () -> Void] = [:]
     private var mediaObservers: [UUID: @MainActor () -> Void] = [:]
     private var inspectorObservers: [UUID: @MainActor () -> Void] = [:]
     private var selectionObservers: [UUID: @MainActor () -> Void] = [:]
@@ -126,6 +127,10 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
 
     public func addTimelineObserver(_ observer: @escaping @MainActor () -> Void) {
         timelineObservers[UUID()] = observer
+    }
+
+    public func addTimelineHistoryObserver(_ observer: @escaping @MainActor () -> Void) {
+        timelineHistoryObservers[UUID()] = observer
     }
 
     public func addMediaObserver(_ observer: @escaping @MainActor () -> Void) {
@@ -690,7 +695,7 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
             for await status in historyStream {
                 await MainActor.run {
                     self.timelineHistoryStatus = status
-                    self.notify(self.timelineObservers)
+                    self.notify(self.timelineHistoryObservers)
                 }
             }
         }
