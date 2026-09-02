@@ -1344,6 +1344,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         jumpToLatestButton.isHidden = !show
         jumpToLatestButton.toolTip = TooltipSurfacePolicy.tooltipIfVisible(
             isHidden: !show,
+            isZeroSized: jumpToLatestButton.bounds.width <= 0 || jumpToLatestButton.bounds.height <= 0,
             raw: "Jump to latest messages"
         )
     }

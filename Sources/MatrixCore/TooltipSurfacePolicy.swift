@@ -20,8 +20,12 @@ public enum TooltipSurfacePolicy: Sendable {
 
     /// Hidden or zero-size views must not register a tooltip; AppKit can still
     /// spawn the tooltip window at a bogus origin during first launch layout.
-    public static func tooltipIfVisible(isHidden: Bool, raw: String?) -> String? {
-        guard !isHidden else { return nil }
+    public static func tooltipIfVisible(
+        isHidden: Bool,
+        isZeroSized: Bool = false,
+        raw: String?
+    ) -> String? {
+        guard !isHidden, !isZeroSized else { return nil }
         return assignableTooltip(raw)
     }
 

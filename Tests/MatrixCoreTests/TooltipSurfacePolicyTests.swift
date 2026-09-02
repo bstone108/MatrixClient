@@ -31,7 +31,7 @@ func roomIDMustNotBeStoredAsAHeaderTooltip() {
 }
 
 @Test
-func hiddenControlsDoNotRegisterATooltipSurface() {
+func hiddenOrZeroSizedControlsDoNotRegisterATooltipSurface() {
     #expect(
         TooltipSurfacePolicy.tooltipIfVisible(
             isHidden: true,
@@ -41,6 +41,14 @@ func hiddenControlsDoNotRegisterATooltipSurface() {
     #expect(
         TooltipSurfacePolicy.tooltipIfVisible(
             isHidden: false,
+            isZeroSized: true,
+            raw: "Jump to latest messages"
+        ) == nil
+    )
+    #expect(
+        TooltipSurfacePolicy.tooltipIfVisible(
+            isHidden: false,
+            isZeroSized: false,
             raw: "Jump to latest messages"
         ) == "Jump to latest messages"
     )
