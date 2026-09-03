@@ -721,6 +721,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private var didFocusComposerForCurrentRoom = false
     private var isRestoringScroll = false
     private var scrollRestoreCoordinator = TimelineScrollRestoreCoordinator()
+    private var renderedTimelineItems: [TimelineItem] = []
     private var mediaPreviewAvailabilityByItemID: [String: Bool] = [:]
     private var paginationDebounceTask: Task<Void, Never>?
     private var liveFollow = TimelineLiveFollowPolicy()
@@ -1115,6 +1116,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private func resetTimelineViewportForRoomChange() {
         scrollRestoreCoordinator.reset()
         isRestoringScroll = false
+        renderedTimelineItems = []
         mediaPreviewAvailabilityByItemID = [:]
         paginationDebounceTask?.cancel()
         paginationDebounceTask = nil
@@ -1162,13 +1164,25 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     private func reloadTimeline() {
         let composerWasFirst = view.window?.firstResponder === composerBar.textView
+        let newItems = state.timelineItems
+        let prependedRows = TimelineScrollRestoreCoordinator.prependedRowIndexes(
+            previousItems: renderedTimelineItems,
+            currentItems: newItems
+        )
         let request = beginScrollRestore(mutation: .timelineItemsChanged)
 
-        tableView.reloadData()
-        if !state.timelineItems.isEmpty {
-            tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<state.timelineItems.count))
+        if let prependedRows {
+            tableView.beginUpdates()
+            tableView.insertRows(at: prependedRows, withAnimation: [])
+            tableView.endUpdates()
+        } else {
+            tableView.reloadData()
+            if !newItems.isEmpty {
+                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<newItems.count))
+            }
         }
         tableView.layoutSubtreeIfNeeded()
+        renderedTimelineItems = newItems
         mediaPreviewAvailabilityByItemID = currentMediaPreviewAvailability()
         updateEmptyState()
         updateHistoryBanner()
@@ -1292,10 +1306,11 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     }
 
     private func finishScrollRestore(_ request: TimelineScrollRestoreRequest?) {
-        guard let request else { return }
-        guard scrollRestoreCoordinator.perform(request, restore: { [weak self] anchor in
-            self?.restoreScrollAnchor(anchor)
-        }) else { return }
+        guard let request,
+              let anchor = scrollRestoreCoordinator.takeAnchor(for: request) else {
+            return
+        }
+        restoreScrollAnchor(anchor)
         isRestoringScroll = false
         updateJumpToLatestButtonVisibility()
     }
@@ -1306,6 +1321,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             trackedRoomID = roomID
             liveFollow.resetForSelectedRoomChange()
             scrollRestoreCoordinator.reset()
+            renderedTimelineItems = []
             mediaPreviewAvailabilityByItemID = [:]
         }
         let visibleRect = scrollView.contentView.documentVisibleRect

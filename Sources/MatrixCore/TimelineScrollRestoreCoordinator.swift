@@ -38,6 +38,18 @@ public struct TimelineScrollRestoreCoordinator: Sendable {
 
     public var currentGeneration: UInt64 { nextGeneration }
 
+    public static func prependedRowIndexes<Item: Equatable>(
+        previousItems: [Item],
+        currentItems: [Item]
+    ) -> IndexSet? {
+        guard !previousItems.isEmpty,
+              currentItems.count > previousItems.count,
+              Array(currentItems.suffix(previousItems.count)) == previousItems else {
+            return nil
+        }
+        return IndexSet(integersIn: 0..<(currentItems.count - previousItems.count))
+    }
+
     public mutating func begin(
         mutation: TimelineViewportMutation,
         capturedAnchor: TimelineScrollAnchor
@@ -54,15 +66,10 @@ public struct TimelineScrollRestoreCoordinator: Sendable {
         request.generation == nextGeneration && pendingAnchor == request.anchor
     }
 
-    @discardableResult
-    public mutating func perform(
-        _ request: TimelineScrollRestoreRequest,
-        restore: (TimelineScrollAnchor) -> Void
-    ) -> Bool {
-        guard mayApply(request) else { return false }
-        restore(request.anchor)
+    public mutating func takeAnchor(for request: TimelineScrollRestoreRequest) -> TimelineScrollAnchor? {
+        guard mayApply(request) else { return nil }
         pendingAnchor = nil
-        return true
+        return request.anchor
     }
 
     @discardableResult

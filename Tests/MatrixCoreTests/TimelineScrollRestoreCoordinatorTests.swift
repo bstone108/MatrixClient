@@ -53,6 +53,20 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func unchangedSuffixUsesANoAnimationTopRowInsertion() {
+        let insertedRows = TimelineScrollRestoreCoordinator.prependedRowIndexes(
+            previousItems: ["visible", "latest"],
+            currentItems: ["older-a", "older-b", "visible", "latest"]
+        )
+
+        #expect(insertedRows == IndexSet([0, 1]))
+        #expect(TimelineScrollRestoreCoordinator.prependedRowIndexes(
+            previousItems: ["visible", "latest"],
+            currentItems: ["visible", "changed-latest"]
+        ) == nil)
+    }
+
+    @Test
     func restoringAValidRequestExecutesTheAnchorInTheCurrentLayoutPass() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
         let requestOptional = coordinator.begin(
@@ -60,14 +74,9 @@ struct TimelineScrollRestoreCoordinatorTests {
             capturedAnchor: readerAnchor
         )
         let request = try #require(requestOptional)
-        var restoredAnchors: [TimelineScrollAnchor] = []
+        let restoredAnchor = coordinator.takeAnchor(for: request)
 
-        let didRestore = coordinator.perform(request) { anchor in
-            restoredAnchors.append(anchor)
-        }
-
-        #expect(didRestore)
-        #expect(restoredAnchors == [readerAnchor])
+        #expect(restoredAnchor == readerAnchor)
         #expect(!coordinator.mayApply(request))
     }
 
