@@ -55,6 +55,17 @@ public struct TimelineScrollRestoreCoordinator: Sendable {
     }
 
     @discardableResult
+    public mutating func perform(
+        _ request: TimelineScrollRestoreRequest,
+        restore: (TimelineScrollAnchor) -> Void
+    ) -> Bool {
+        guard mayApply(request) else { return false }
+        restore(request.anchor)
+        pendingAnchor = nil
+        return true
+    }
+
+    @discardableResult
     public mutating func complete(_ request: TimelineScrollRestoreRequest) -> Bool {
         guard mayApply(request) else { return false }
         pendingAnchor = nil

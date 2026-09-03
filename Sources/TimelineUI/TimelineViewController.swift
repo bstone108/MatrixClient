@@ -1293,13 +1293,11 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
 
     private func finishScrollRestore(_ request: TimelineScrollRestoreRequest?) {
         guard let request else { return }
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.scrollRestoreCoordinator.mayApply(request) else { return }
-            self.restoreScrollAnchor(request.anchor)
-            guard self.scrollRestoreCoordinator.complete(request) else { return }
-            self.isRestoringScroll = false
-            self.updateJumpToLatestButtonVisibility()
-        }
+        guard scrollRestoreCoordinator.perform(request, restore: { [weak self] anchor in
+            self?.restoreScrollAnchor(anchor)
+        }) else { return }
+        isRestoringScroll = false
+        updateJumpToLatestButtonVisibility()
     }
 
     private func currentScrollAnchor() -> TimelineScrollAnchor {

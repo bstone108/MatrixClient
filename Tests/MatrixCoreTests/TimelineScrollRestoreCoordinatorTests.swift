@@ -53,6 +53,25 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func restoringAValidRequestExecutesTheAnchorInTheCurrentLayoutPass() throws {
+        var coordinator = TimelineScrollRestoreCoordinator()
+        let requestOptional = coordinator.begin(
+            mutation: .timelineItemsChanged,
+            capturedAnchor: readerAnchor
+        )
+        let request = try #require(requestOptional)
+        var restoredAnchors: [TimelineScrollAnchor] = []
+
+        let didRestore = coordinator.perform(request) { anchor in
+            restoredAnchors.append(anchor)
+        }
+
+        #expect(didRestore)
+        #expect(restoredAnchors == [readerAnchor])
+        #expect(!coordinator.mayApply(request))
+    }
+
+    @Test
     func roomChangeInvalidatesPendingAnchorBeforeTheNextRoomBeginsItsRestore() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
         let roomAOptional = coordinator.begin(
