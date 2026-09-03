@@ -50,6 +50,17 @@ public struct TimelineScrollRestoreCoordinator: Sendable {
         return IndexSet(integersIn: 0..<(currentItems.count - previousItems.count))
     }
 
+    /// The table still displays its previous snapshot until an insertion or reload.
+    /// Capture a viewport anchor from that snapshot, rather than model items that
+    /// have already received an older-history prepend.
+    public static func itemAtVisibleRow<Item>(
+        renderedItems: [Item],
+        row: Int
+    ) -> Item? {
+        guard renderedItems.indices.contains(row) else { return nil }
+        return renderedItems[row]
+    }
+
     public mutating func begin(
         mutation: TimelineViewportMutation,
         capturedAnchor: TimelineScrollAnchor

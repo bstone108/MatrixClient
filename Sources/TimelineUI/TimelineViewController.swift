@@ -1328,9 +1328,13 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         let rows = tableView.rows(in: visibleRect)
         var itemID: String?
         var rowMinY: CGFloat = 0
+        let displayedItems = renderedTimelineItems.isEmpty ? state.timelineItems : renderedTimelineItems
         if rows.location != NSNotFound, rows.length > 0,
-           state.timelineItems.indices.contains(rows.location) {
-            itemID = state.timelineItems[rows.location].id
+           let displayedItem = TimelineScrollRestoreCoordinator.itemAtVisibleRow(
+               renderedItems: displayedItems,
+               row: rows.location
+           ) {
+            itemID = displayedItem.id
             rowMinY = tableView.rect(ofRow: rows.location).minY
         }
         return TimelineScrollAnchor.capture(
