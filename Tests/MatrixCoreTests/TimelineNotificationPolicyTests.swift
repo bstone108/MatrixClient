@@ -125,3 +125,11 @@ func frontmostSuppressionRequiresActiveTimelineForThatRoom() {
         )
     )
 }
+
+@Test
+func timelineEventVisibilityHidesGenericAndUnparseableStateEvents() {
+    #expect(!TimelineEventVisibilityPolicy.shouldRender(.state))
+    #expect(!TimelineEventVisibilityPolicy.shouldRender(.failedToParseState))
+    #expect(TimelineEventVisibilityPolicy.shouldRender(.messageLike))
+    #expect(TimelineEventVisibilityPolicy.shouldRender(.membership))
+}
