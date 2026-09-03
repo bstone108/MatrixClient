@@ -67,6 +67,20 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func visibleRowUsesThePreviouslyRenderedItemDuringAPrepend() {
+        let previousRows = ["visible", "latest"]
+        let incomingRows = ["older-a", "older-b", "visible", "latest"]
+
+        let visibleItem = TimelineScrollRestoreCoordinator.itemAtVisibleRow(
+            renderedItems: previousRows,
+            row: 0
+        )
+
+        #expect(visibleItem == "visible")
+        #expect(visibleItem != incomingRows[0])
+    }
+
+    @Test
     func restoringAValidRequestExecutesTheAnchorInTheCurrentLayoutPass() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
         let requestOptional = coordinator.begin(
