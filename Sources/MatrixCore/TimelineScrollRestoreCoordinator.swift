@@ -38,6 +38,29 @@ public struct TimelineScrollRestoreCoordinator: Sendable {
 
     public var currentGeneration: UInt64 { nextGeneration }
 
+    public static func prependedRowIndexes<Item: Equatable>(
+        previousItems: [Item],
+        currentItems: [Item]
+    ) -> IndexSet? {
+        guard !previousItems.isEmpty,
+              currentItems.count > previousItems.count,
+              Array(currentItems.suffix(previousItems.count)) == previousItems else {
+            return nil
+        }
+        return IndexSet(integersIn: 0..<(currentItems.count - previousItems.count))
+    }
+
+    /// The table still displays its previous snapshot until an insertion or reload.
+    /// Capture a viewport anchor from that snapshot, rather than model items that
+    /// have already received an older-history prepend.
+    public static func itemAtVisibleRow<Item>(
+        renderedItems: [Item],
+        row: Int
+    ) -> Item? {
+        guard renderedItems.indices.contains(row) else { return nil }
+        return renderedItems[row]
+    }
+
     public mutating func begin(
         mutation: TimelineViewportMutation,
         capturedAnchor: TimelineScrollAnchor
@@ -52,6 +75,12 @@ public struct TimelineScrollRestoreCoordinator: Sendable {
 
     public func mayApply(_ request: TimelineScrollRestoreRequest) -> Bool {
         request.generation == nextGeneration && pendingAnchor == request.anchor
+    }
+
+    public mutating func takeAnchor(for request: TimelineScrollRestoreRequest) -> TimelineScrollAnchor? {
+        guard mayApply(request) else { return nil }
+        pendingAnchor = nil
+        return request.anchor
     }
 
     @discardableResult

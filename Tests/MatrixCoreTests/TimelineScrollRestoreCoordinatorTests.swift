@@ -53,6 +53,48 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func unchangedSuffixUsesANoAnimationTopRowInsertion() {
+        let insertedRows = TimelineScrollRestoreCoordinator.prependedRowIndexes(
+            previousItems: ["visible", "latest"],
+            currentItems: ["older-a", "older-b", "visible", "latest"]
+        )
+
+        #expect(insertedRows == IndexSet([0, 1]))
+        #expect(TimelineScrollRestoreCoordinator.prependedRowIndexes(
+            previousItems: ["visible", "latest"],
+            currentItems: ["visible", "changed-latest"]
+        ) == nil)
+    }
+
+    @Test
+    func visibleRowUsesThePreviouslyRenderedItemDuringAPrepend() {
+        let previousRows = ["visible", "latest"]
+        let incomingRows = ["older-a", "older-b", "visible", "latest"]
+
+        let visibleItem = TimelineScrollRestoreCoordinator.itemAtVisibleRow(
+            renderedItems: previousRows,
+            row: 0
+        )
+
+        #expect(visibleItem == "visible")
+        #expect(visibleItem != incomingRows[0])
+    }
+
+    @Test
+    func restoringAValidRequestExecutesTheAnchorInTheCurrentLayoutPass() throws {
+        var coordinator = TimelineScrollRestoreCoordinator()
+        let requestOptional = coordinator.begin(
+            mutation: .timelineItemsChanged,
+            capturedAnchor: readerAnchor
+        )
+        let request = try #require(requestOptional)
+        let restoredAnchor = coordinator.takeAnchor(for: request)
+
+        #expect(restoredAnchor == readerAnchor)
+        #expect(!coordinator.mayApply(request))
+    }
+
+    @Test
     func roomChangeInvalidatesPendingAnchorBeforeTheNextRoomBeginsItsRestore() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
         let roomAOptional = coordinator.begin(
