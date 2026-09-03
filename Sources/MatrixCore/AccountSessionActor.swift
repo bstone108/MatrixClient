@@ -2899,6 +2899,9 @@ public actor AccountSessionActor {
         guard let event = item.asEvent() else { return nil }
         let content = event.content
         await updateSpaceRelationshipsIfNeeded(content: content, roomID: roomID)
+        guard TimelineEventVisibilityPolicy.shouldRender(timelineEventVisibility(for: content)) else {
+            return nil
+        }
         let message = messageContent(from: content)
         let status = timelineStatusDetails(for: content)
         let media = message.flatMap(timelineMediaAttachment(for:))
@@ -2957,6 +2960,19 @@ public actor AccountSessionActor {
             deletedAt: isDeleted ? timestamp : nil,
             isMention: isMention
         )
+    }
+
+    private func timelineEventVisibility(for content: TimelineItemContent) -> TimelineEventVisibility {
+        switch content {
+        case .state(_, _):
+            .state
+        case .failedToParseState(_, _, _):
+            .failedToParseState
+        case .roomMembership(_, _, _, _):
+            .membership
+        default:
+            .messageLike
+        }
     }
 
     private func timelineBody(

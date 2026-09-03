@@ -1,6 +1,24 @@
 import Foundation
 
-/// Rules for turning live timeline updates into desktop notifications.
+public enum TimelineEventVisibility: Sendable {
+    case messageLike
+    case membership
+    case state
+    case failedToParseState
+}
+
+/// Matrix state is applied to room/session state but is not conversational timeline content.
+public enum TimelineEventVisibilityPolicy: Sendable {
+    public static func shouldRender(_ event: TimelineEventVisibility) -> Bool {
+        switch event {
+        case .state, .failedToParseState:
+            false
+        case .messageLike, .membership:
+            true
+        }
+    }
+}
+
 /// History snapshots must not notify; only messages that arrive after a room is primed should.
 public enum TimelineNotificationPolicy: Sendable {
     public static func isNotifiableIncomingMessage(_ item: TimelineItem) -> Bool {
