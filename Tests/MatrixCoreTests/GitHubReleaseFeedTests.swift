@@ -43,11 +43,11 @@ func githubReleaseFeedIgnoresDraftsPrereleasesAndPicksNewestDmg() throws {
     """.data(using: .utf8)!
 
     let releases = try GitHubReleaseFeed.parseReleases(from: json)
-    #expect(releases.map(\.version.rawValue) == ["2026.8.25.2", "2026.8.25.1"])
+    #expect(releases.map(\.version.rawValue) == ["2026.08.25.02", "2026.08.25.01"])
 
     let current = DateBuildVersion.parse("2026.8.24.9")
     let newest = GitHubReleaseFeed.newestRelease(in: releases, newerThan: current, architecture: "arm64")
-    #expect(newest?.0.version.rawValue == "2026.8.25.2")
+    #expect(newest?.0.version.rawValue == "2026.08.25.02")
     #expect(newest?.1.name == "MatrixClient-2026.8.25.2-macos-arm64.dmg")
 }
 
@@ -144,14 +144,14 @@ func githubReleaseFeedIgnoresUniversalDmg() throws {
     let current = DateBuildVersion.parse("2026.8.25.2")
     let appleSilicon = GitHubReleaseFeed.newestRelease(in: releases, newerThan: current, architecture: "arm64")
     let intel = GitHubReleaseFeed.newestRelease(in: releases, newerThan: current, architecture: "x86_64")
-    #expect(appleSilicon?.0.version.rawValue == "2026.8.27.1")
+    #expect(appleSilicon?.0.version.rawValue == "2026.08.27.01")
     #expect(appleSilicon?.1.name == "MatrixClient-2026.8.27.1-macos-arm64.dmg")
     #expect(intel?.1.name == "MatrixClient-2026.8.27.1-macos-x86_64.dmg")
 }
 
 @Test
 func githubReleaseFeedSparkleURLsArePerArchAndNeverUniversal() throws {
-    let version = try #require(DateBuildVersion.parse("2026.8.28.1"))
+    let version = try #require(DateBuildVersion.parse("2026.08.28.01"))
     let armFeed = try #require(GitHubReleaseFeed.appcastURL(architecture: "arm64"))
     let intelFeed = try #require(GitHubReleaseFeed.appcastURL(architecture: "x86_64"))
     #expect(armFeed.absoluteString.hasSuffix("/releases/latest/download/appcast-arm64.xml"))
@@ -160,7 +160,7 @@ func githubReleaseFeedSparkleURLsArePerArchAndNeverUniversal() throws {
 
     let armDmg = try #require(GitHubReleaseFeed.diskImageDownloadURL(version: version, architecture: "arm64"))
     let intelDmg = try #require(GitHubReleaseFeed.diskImageDownloadURL(version: version, architecture: "x86_64"))
-    #expect(armDmg.lastPathComponent == "MatrixClient-2026.8.28.1-macos-arm64.dmg")
-    #expect(intelDmg.lastPathComponent == "MatrixClient-2026.8.28.1-macos-x86_64.dmg")
+    #expect(armDmg.lastPathComponent == "MatrixClient-2026.08.28.01-macos-arm64.dmg")
+    #expect(intelDmg.lastPathComponent == "MatrixClient-2026.08.28.01-macos-x86_64.dmg")
     #expect(GitHubReleaseFeed.diskImageDownloadURL(version: version, architecture: "universal") == nil)
 }

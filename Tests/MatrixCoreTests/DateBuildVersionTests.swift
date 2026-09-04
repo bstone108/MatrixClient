@@ -10,9 +10,16 @@ func dateBuildVersionParsesCanonicalPaddedTags() {
 }
 
 @Test
-func dateBuildVersionRejectsNonCanonicalFormats() {
-    #expect(DateBuildVersion.parse("2026.8.25.2") == nil)
+func dateBuildVersionReadsLegacyUnpaddedTagsAndNormalizesThem() {
+    let version = DateBuildVersion.parse("v2026.8.25.2")
+    #expect(version == DateBuildVersion(year: 2026, month: 8, day: 25, build: 2))
+    #expect(version?.rawValue == "2026.08.25.02")
+}
+
+@Test
+func dateBuildVersionRejectsMixedOrInvalidFormats() {
     #expect(DateBuildVersion.parse("2026.08.25.2") == nil)
+    #expect(DateBuildVersion.parse("2026.8.25.02") == nil)
     #expect(DateBuildVersion.parse("2026.08.25.00") == nil)
     #expect(DateBuildVersion.parse("0.1.0") == nil)
     #expect(DateBuildVersion.parse("ci") == nil)

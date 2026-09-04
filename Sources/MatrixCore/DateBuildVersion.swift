@@ -33,12 +33,18 @@ public struct DateBuildVersion: Comparable, Hashable, Sendable, CustomStringConv
               let build = Int(parts[3]), (1...99).contains(build) else {
             return nil
         }
-        guard parts[1].count == 2,
-              parts[2].count == 2,
-              parts[3].count == 2,
-              String(format: "%02d", month) == parts[1],
-              String(format: "%02d", day) == parts[2],
-              String(format: "%02d", build) == parts[3] else {
+        let isCanonical = parts[1].count == 2 &&
+            parts[2].count == 2 &&
+            parts[3].count == 2 &&
+            String(format: "%02d", month) == parts[1] &&
+            String(format: "%02d", day) == parts[2] &&
+            String(format: "%02d", build) == parts[3]
+        let isLegacy = String(month) == parts[1] &&
+            String(day) == parts[2] &&
+            String(build) == parts[3]
+        // Keep reading previously published unpadded releases, but normalize
+        // their numeric value so newly issued versions remain canonical.
+        guard isCanonical || isLegacy else {
             return nil
         }
         return DateBuildVersion(year: year, month: month, day: day, build: build)
