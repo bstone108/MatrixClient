@@ -54,6 +54,16 @@ enum TimelineItemReconciler {
         }.map(\.element)
     }
 
+    /// The first SDK callback commonly contains only its bounded live window.
+    /// Keep older locally persisted display rows until SDK pagination catches
+    /// up, while allowing the SDK copy of an overlapping event to refresh it.
+    static func mergedInitialSDKWindow(
+        sdkItems: [TimelineItem],
+        cachedDisplayItems: [TimelineItem]
+    ) -> [TimelineItem] {
+        chronologicallyOrdered(deduplicated(cachedDisplayItems + sdkItems))
+    }
+
     static func normalizedReadReceipts(in items: [TimelineItem]) -> [TimelineItem] {
         guard !items.isEmpty else { return [] }
 

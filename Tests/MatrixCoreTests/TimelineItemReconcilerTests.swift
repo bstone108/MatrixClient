@@ -3,6 +3,49 @@ import Foundation
 import Testing
 
 @Test
+func initialSDKWindowRetainsOlderPersistedTimelineItems() {
+    let roomID = RoomIdentifier(rawValue: "!room:test")
+    let cachedOlder = TimelineItem(
+        id: "$cached-older:test",
+        roomID: roomID,
+        senderID: "@alice:test",
+        senderDisplayName: "Alice",
+        body: "cached older",
+        timestamp: Date(timeIntervalSince1970: 100),
+        isOwnMessage: false,
+        isEncrypted: true
+    )
+    let cachedLatest = TimelineItem(
+        id: "$cached-latest:test",
+        roomID: roomID,
+        senderID: "@alice:test",
+        senderDisplayName: "Alice",
+        body: "cached latest",
+        timestamp: Date(timeIntervalSince1970: 200),
+        isOwnMessage: false,
+        isEncrypted: true
+    )
+    let sdkWindowLatest = TimelineItem(
+        id: "$cached-latest:test",
+        roomID: roomID,
+        senderID: "@alice:test",
+        senderDisplayName: "Alice",
+        body: "SDK latest",
+        timestamp: Date(timeIntervalSince1970: 200),
+        isOwnMessage: false,
+        isEncrypted: true
+    )
+
+    let merged = TimelineItemReconciler.mergedInitialSDKWindow(
+        sdkItems: [sdkWindowLatest],
+        cachedDisplayItems: [cachedOlder, cachedLatest]
+    )
+
+    #expect(merged.map(\.id) == ["$cached-older:test", "$cached-latest:test"])
+    #expect(merged.last?.body == "SDK latest")
+}
+
+@Test
 func paginatedOlderEventStaysBeforeLatestAfterHistoryMerge() {
     let roomID = RoomIdentifier(rawValue: "!room:test")
     let latest = TimelineItem(
