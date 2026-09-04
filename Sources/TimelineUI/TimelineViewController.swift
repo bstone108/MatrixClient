@@ -1165,31 +1165,54 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private func reloadTimeline() {
         let composerWasFirst = view.window?.firstResponder === composerBar.textView
         let newItems = state.timelineItems
-        let prependedRows = TimelineScrollRestoreCoordinator.prependedRowIndexes(
+        let updatePlan = TimelineTableUpdatePlan.leadingMutation(
             previousItems: renderedTimelineItems,
-            currentItems: newItems
+            currentItems: newItems,
+            id: \.id
         )
         let request = beginScrollRestore(mutation: .timelineItemsChanged)
 
-        if let prependedRows {
-            tableView.beginUpdates()
-            tableView.insertRows(at: prependedRows, withAnimation: [])
-            tableView.endUpdates()
-        } else {
-            tableView.reloadData()
-            if !newItems.isEmpty {
-                tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<newItems.count))
+        withoutTimelineRowAnimations {
+            if let updatePlan {
+                tableView.beginUpdates()
+                if !updatePlan.deletedRows.isEmpty {
+                    tableView.removeRows(at: updatePlan.deletedRows, withAnimation: [])
+                }
+                if !updatePlan.insertedRows.isEmpty {
+                    tableView.insertRows(at: updatePlan.insertedRows, withAnimation: [])
+                }
+                if !updatePlan.reloadedRows.isEmpty {
+                    tableView.reloadData(
+                        forRowIndexes: updatePlan.reloadedRows,
+                        columnIndexes: IndexSet(integer: 0)
+                    )
+                    tableView.noteHeightOfRows(withIndexesChanged: updatePlan.reloadedRows)
+                }
+                tableView.endUpdates()
+            } else {
+                tableView.reloadData()
+                if !newItems.isEmpty {
+                    tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integersIn: 0..<newItems.count))
+                }
             }
+            tableView.layoutSubtreeIfNeeded()
+            renderedTimelineItems = newItems
+            mediaPreviewAvailabilityByItemID = currentMediaPreviewAvailability()
+            updateEmptyState()
+            updateHistoryBanner()
+            finishScrollRestore(request)
         }
-        tableView.layoutSubtreeIfNeeded()
-        renderedTimelineItems = newItems
-        mediaPreviewAvailabilityByItemID = currentMediaPreviewAvailability()
-        updateEmptyState()
-        updateHistoryBanner()
-        finishScrollRestore(request)
 
         if composerWasFirst {
             focusComposerIfNeeded(force: true)
+        }
+    }
+
+    private func withoutTimelineRowAnimations(_ updates: () -> Void) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            updates()
         }
     }
 
@@ -1209,12 +1232,14 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
             ? nil
             : beginScrollRestore(mutation: .mediaRowHeightsChanged)
 
-        refreshVisibleMediaCells()
-        if !heightsNeedUpdate.isEmpty {
-            tableView.noteHeightOfRows(withIndexesChanged: heightsNeedUpdate)
-            tableView.layoutSubtreeIfNeeded()
+        withoutTimelineRowAnimations {
+            refreshVisibleMediaCells()
+            if !heightsNeedUpdate.isEmpty {
+                tableView.noteHeightOfRows(withIndexesChanged: heightsNeedUpdate)
+                tableView.layoutSubtreeIfNeeded()
+            }
+            finishScrollRestore(request)
         }
-        finishScrollRestore(request)
     }
 
     private func currentMediaPreviewAvailability() -> [String: Bool] {
