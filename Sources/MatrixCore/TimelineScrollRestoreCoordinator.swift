@@ -30,6 +30,25 @@ public struct TimelineScrollRestoreRequest: Equatable, Sendable {
 /// Progress/banner updates do not mutate the viewport, and a new real geometry
 /// change invalidates a previously queued restore without recapturing a transient
 /// AppKit viewport position.
+public enum TimelineMediaHeightUpdatePlan {
+    /// Image rows whose preview state changed must only be remeasured while
+    /// visible. Offscreen rows keep their prior measured height until they
+    /// enter the viewport, avoiding geometry churn above or below the reader.
+    public static func visibleChangedRows<Item>(
+        items: [Item],
+        visibleRows: IndexSet,
+        appliedPreviewAvailabilityByItemID: [String: Bool],
+        id: (Item) -> String,
+        previewIsAvailable: (Item) -> Bool
+    ) -> IndexSet {
+        IndexSet(visibleRows.compactMap { row in
+            guard items.indices.contains(row) else { return nil }
+            let item = items[row]
+            return appliedPreviewAvailabilityByItemID[id(item)] == previewIsAvailable(item) ? nil : row
+        })
+    }
+}
+
 /// A staged table transaction that leaves an unchanged trailing portion of a
 /// timeline in place. This covers history pages that recompact/replace one or
 /// more *leading* presentation rows while retaining the reader's visible rows.

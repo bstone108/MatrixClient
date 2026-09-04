@@ -1220,13 +1220,27 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         guard !state.timelineItems.isEmpty else { return }
 
         let currentAvailability = currentMediaPreviewAvailability()
-        var heightsNeedUpdate = IndexSet()
-        for (row, item) in state.timelineItems.enumerated() where item.media != nil {
-            if mediaPreviewAvailabilityByItemID[item.id] != currentAvailability[item.id] {
-                heightsNeedUpdate.insert(row)
-            }
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let visibleRange = tableView.rows(in: visibleRect)
+        let visibleRows: IndexSet
+        if visibleRange.location == NSNotFound || visibleRange.length == 0 {
+            visibleRows = []
+        } else {
+            let upperBound = min(tableView.numberOfRows, visibleRange.location + visibleRange.length)
+            visibleRows = IndexSet(integersIn: visibleRange.location..<upperBound)
         }
-        mediaPreviewAvailabilityByItemID = currentAvailability
+        let heightsNeedUpdate = TimelineMediaHeightUpdatePlan.visibleChangedRows(
+            items: state.timelineItems,
+            visibleRows: visibleRows,
+            appliedPreviewAvailabilityByItemID: mediaPreviewAvailabilityByItemID,
+            id: \.id,
+            previewIsAvailable: { currentAvailability[$0.id] ?? false }
+        )
+        for row in visibleRows {
+            let item = state.timelineItems[row]
+            guard item.media != nil else { continue }
+            mediaPreviewAvailabilityByItemID[item.id] = currentAvailability[item.id] ?? false
+        }
 
         let request = heightsNeedUpdate.isEmpty
             ? nil
@@ -1275,6 +1289,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         guard !observedDuringRestore,
               observedGeneration == scrollRestoreCoordinator.currentGeneration,
               !isRestoringScroll else { return }
+        refreshVisibleMediaRows()
         liveFollow.applyUserScroll(isAtBottom: isScrolledToBottom())
         updateJumpToLatestButtonVisibility()
         if liveFollow.isFollowingLiveTraffic {
