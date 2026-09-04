@@ -18,7 +18,7 @@ from xml.sax.saxutils import escape
 
 ALLOWED_ARCHES = {"arm64", "x86_64"}
 DATE_BUILD_RE = re.compile(
-    r"^[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])\.[1-9][0-9]*$"
+    r"^[0-9]{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|[1-9][0-9])$"
 )
 SIGN_UPDATE_RE = re.compile(
     r'sparkle:edSignature="(?P<signature>[^"]+)"\s+length="(?P<length>\d+)"'
@@ -115,28 +115,28 @@ def self_test() -> None:
     assert length == 12345678, length
 
     arm = render_appcast(
-        version="2026.8.28.1",
+        version="2026.08.28.01",
         architecture="arm64",
         signature=signature,
         length=length,
         pub_date=datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc),
     )
     intel = render_appcast(
-        version="2026.8.28.1",
+        version="2026.08.28.01",
         architecture="x86_64",
         signature=signature,
         length=length,
         pub_date=datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc),
     )
-    assert "MatrixClient-2026.8.28.1-macos-arm64.dmg" in arm
-    assert "MatrixClient-2026.8.28.1-macos-x86_64.dmg" in intel
+    assert "MatrixClient-2026.08.28.01-macos-arm64.dmg" in arm
+    assert "MatrixClient-2026.08.28.01-macos-x86_64.dmg" in intel
     assert "macos-x86_64" not in arm
     assert "macos-arm64" not in intel
     assert "universal" not in arm.lower() and "universal" not in intel.lower()
-    assert "sparkle:version>2026.8.28.1<" in arm
+    assert "sparkle:version>2026.08.28.01<" in arm
     assert 'sparkle:edSignature="AbCd+/Ef=="' in arm
-    assert disk_image_url("2026.8.28.1", "arm64").endswith(
-        "/v2026.8.28.1/MatrixClient-2026.8.28.1-macos-arm64.dmg"
+    assert disk_image_url("2026.08.28.01", "arm64").endswith(
+        "/v2026.08.28.01/MatrixClient-2026.08.28.01-macos-arm64.dmg"
     )
     assert appcast_name("x86_64") == "appcast-x86_64.xml"
 

@@ -1,6 +1,6 @@
 import Foundation
 
-/// `YYYY.M.D.N` America/Chicago date.build (unpadded month and day).
+/// `YYYY.MM.DD.BB` America/Chicago date.build.
 public struct DateBuildVersion: Comparable, Hashable, Sendable, CustomStringConvertible {
     public let year: Int
     public let month: Int
@@ -10,7 +10,7 @@ public struct DateBuildVersion: Comparable, Hashable, Sendable, CustomStringConv
     public var description: String { rawValue }
 
     public var rawValue: String {
-        "\(year).\(month).\(day).\(build)"
+        String(format: "%04d.%02d.%02d.%02d", year, month, day, build)
     }
 
     public init(year: Int, month: Int, day: Int, build: Int) {
@@ -30,11 +30,15 @@ public struct DateBuildVersion: Comparable, Hashable, Sendable, CustomStringConv
               let year = Int(parts[0]), year >= 1_000, year <= 9_999,
               let month = Int(parts[1]), (1...12).contains(month),
               let day = Int(parts[2]), (1...31).contains(day),
-              let build = Int(parts[3]), build >= 1 else {
+              let build = Int(parts[3]), (1...99).contains(build) else {
             return nil
         }
-        // Reject zero-padded month/day such as 2026.08.24.1.
-        guard String(month) == parts[1], String(day) == parts[2] else {
+        guard parts[1].count == 2,
+              parts[2].count == 2,
+              parts[3].count == 2,
+              String(format: "%02d", month) == parts[1],
+              String(format: "%02d", day) == parts[2],
+              String(format: "%02d", build) == parts[3] else {
             return nil
         }
         return DateBuildVersion(year: year, month: month, day: day, build: build)
