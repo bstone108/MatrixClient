@@ -213,7 +213,6 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
             guard let self else { return }
             await self.loadRoomDetails()
             await self.subscribeToTimeline()
-            self.markSelectedRoomAsRead()
         }
     }
 

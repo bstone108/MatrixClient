@@ -1448,7 +1448,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         pendingReadMarkTask?.cancel()
         pendingReadMarkTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, self.isScrolledToBottom() else { return }
             await MainActor.run {
                 self.state.markSelectedRoomAsRead()
             }
