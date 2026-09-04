@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 # PR verification can cancel in-progress runs. Real releases are serialized so
-# two publishes cannot assign the same YYYY.M.D.N.
+# two publishes cannot assign the same YYYY.MM.DD.BB.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || 'publish' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -246,7 +246,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [[ ! "${APP_VERSION}" =~ ^[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])\.[1-9][0-9]*$ ]]; then
+          if [[ ! "${APP_VERSION}" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|[1-9][0-9])$ ]]; then
             echo "Refusing to publish non-release version ${APP_VERSION}" >&2
             exit 1
           fi

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Compute MatrixClient date.build versions for real releases only.
 
-Format: YYYY.M.D.N in America/Chicago (unpadded month and day).
+Format: YYYY.MM.DD.BB in America/Chicago (zero-padded month, day, and build).
 N resets each Central-time calendar day and is max(existing)+1 for that prefix,
 or 1 if none.
 
@@ -24,13 +24,14 @@ from zoneinfo import ZoneInfo
 
 CHICAGO = ZoneInfo("America/Chicago")
 
-# Unpadded month/day. Rejects 2026.08.24.1 and leftover 0.1.0.
+# Canonical release format. Legacy unpadded releases are accepted only while
+# scanning existing numbers so a same-day migration cannot reuse a build.
 DATE_BUILD_RE = re.compile(
     r"^v?(?P<version>"
     r"(?P<year>\d{4})\."
-    r"(?P<month>[1-9]|1[0-2])\."
-    r"(?P<day>[1-9]|[12]\d|3[01])\."
-    r"(?P<n>[1-9]\d*)"
+    r"(?P<month>0[1-9]|1[0-2])\."
+    r"(?P<day>0[1-9]|[12]\d|3[01])\."
+    r"(?P<n>0[1-9]|[1-9]\d)"
     r")$"
 )
 
@@ -45,42 +46,50 @@ def chicago_now(now: datetime | None = None) -> datetime:
 
 def date_prefix(now: datetime | None = None) -> str:
     stamp = chicago_now(now)
-    return f"{stamp.year}.{stamp.month}.{stamp.day}"
+    return f"{stamp.year}.{stamp.month:02d}.{stamp.day:02d}"
 
 
 def parse_date_build_version(value: str) -> str:
     match = DATE_BUILD_RE.fullmatch(value.strip())
     if not match:
         raise ValueError(
-            f"Not a date.build version (YYYY.M.D.N, unpadded month/day): {value!r}"
+            f"Not a date.build version (YYYY.MM.DD.BB): {value!r}"
         )
     return match.group("version")
 
 
-def version_pattern(prefix: str) -> re.Pattern[str]:
-    # Do not use a word boundary before the version: tags are vYYYY.M.D.N, and
-    # \b does not split between 'v' and a digit. Ignore padded 2026.08.24.N
-    # when the prefix is 2026.8.24, and ignore leftover 0.1.0 artifacts.
-    return re.compile(rf"(?:^|[^0-9])(?:v)?{re.escape(prefix)}\.(\d+)(?=$|[^0-9])")
+def version_patterns(prefix: str) -> tuple[re.Pattern[str], ...]:
+    # Do not use a word boundary before the version: tags start with v. Scan
+    # legacy unpadded versions too, but emit only the canonical padded form.
+    year, month, day = prefix.split(".")
+    legacy_prefix = f"{year}.{int(month)}.{int(day)}"
+    prefixes = (prefix,) if legacy_prefix == prefix else (prefix, legacy_prefix)
+    return tuple(
+        re.compile(rf"(?:^|[^0-9])(?:v)?{re.escape(candidate)}\.(\d+)(?=$|[^0-9])")
+        for candidate in prefixes
+    )
 
 
 def extract_build_numbers(prefix: str, texts: Iterable[str]) -> set[int]:
-    pattern = version_pattern(prefix)
+    patterns = version_patterns(prefix)
     found: set[int] = set()
     for text in texts:
         if not text:
             continue
-        for match in pattern.finditer(str(text).strip()):
-            number = int(match.group(1))
-            if number >= 1:
-                found.add(number)
+        for pattern in patterns:
+            for match in pattern.finditer(str(text).strip()):
+                number = int(match.group(1))
+                if number >= 1:
+                    found.add(number)
     return found
 
 
 def next_version(prefix: str, numbers: Iterable[int]) -> str:
     values = [number for number in numbers if number >= 1]
     nxt = (max(values) + 1) if values else 1
-    return f"{prefix}.{nxt}"
+    if nxt > 99:
+        raise ValueError(f"Date.build release count exceeds two-digit BB format for {prefix}")
+    return f"{prefix}.{nxt:02d}"
 
 
 def run_command(argv: list[str]) -> str:
@@ -154,33 +163,33 @@ def collect_existing_numbers(prefix: str) -> set[int]:
 def self_test() -> None:
     august = datetime(2026, 8, 24, 18, 0, tzinfo=CHICAGO)
     january = datetime(2026, 1, 5, 9, 0, tzinfo=CHICAGO)
-    assert date_prefix(august) == "2026.8.24", date_prefix(august)
-    assert date_prefix(january) == "2026.1.5", date_prefix(january)
+    assert date_prefix(august) == "2026.08.24", date_prefix(august)
+    assert date_prefix(january) == "2026.01.05", date_prefix(january)
 
     utc_still_24th = datetime(2026, 8, 25, 4, 30, tzinfo=ZoneInfo("UTC"))
-    assert date_prefix(utc_still_24th) == "2026.8.24", date_prefix(utc_still_24th)
+    assert date_prefix(utc_still_24th) == "2026.08.24", date_prefix(utc_still_24th)
     utc_25th = datetime(2026, 8, 25, 5, 0, tzinfo=ZoneInfo("UTC"))
-    assert date_prefix(utc_25th) == "2026.8.25", date_prefix(utc_25th)
+    assert date_prefix(utc_25th) == "2026.08.25", date_prefix(utc_25th)
 
-    prefix = "2026.8.24"
+    prefix = "2026.08.24"
     samples = [
         "v2026.8.24.1",
         "MatrixClient-2026.8.24.2-macos-arm64",
-        "MatrixClient-2026.8.24.3-macos-x86_64",
-        "MatrixClient 2026.8.24.4",
+        "MatrixClient-2026.08.24.03-macos-x86_64",
+        "MatrixClient 2026.08.24.04",
         "MatrixClient-0.1.0-macos-arm64",
         "MatrixClient-ci-macos-arm64",
         "MatrixClient-ci-macos-x86_64",
-        "v2026.08.24.9",
         "v2026.8.24.10",
+        "v2026.08.24.11",
     ]
     numbers = extract_build_numbers(prefix, samples)
-    assert numbers == {1, 2, 3, 4, 10}, numbers
-    assert next_version(prefix, numbers) == "2026.8.24.11"
-    assert next_version(prefix, set()) == "2026.8.24.1"
-    assert parse_date_build_version("v2026.8.24.1") == "2026.8.24.1"
-    assert parse_date_build_version("2026.8.24.12") == "2026.8.24.12"
-    for invalid in ("0.1.0", "v2026.08.24.1", "ci", "v1.0.0", "2026.8.24"):
+    assert numbers == {1, 2, 3, 4, 10, 11}, numbers
+    assert next_version(prefix, numbers) == "2026.08.24.12"
+    assert next_version(prefix, set()) == "2026.08.24.01"
+    assert parse_date_build_version("v2026.08.24.01") == "2026.08.24.01"
+    assert parse_date_build_version("2026.08.24.12") == "2026.08.24.12"
+    for invalid in ("0.1.0", "v2026.08.24.1", "v2026.8.24.01", "ci", "v1.0.0", "2026.08.24"):
         try:
             parse_date_build_version(invalid)
         except ValueError:
@@ -194,11 +203,11 @@ def main() -> int:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument(
         "--from-tag",
-        help="Use this existing vYYYY.M.D.N tag as the release version (no increment).",
+        help="Use this existing vYYYY.MM.DD.BB tag as the release version (no increment).",
     )
     parser.add_argument(
         "--prefix",
-        help="Override YYYY.M.D prefix (testing). Default: America/Chicago today.",
+        help="Override YYYY.MM.DD prefix (testing). Default: America/Chicago today.",
     )
     args = parser.parse_args()
     if args.self_test:
