@@ -66,7 +66,7 @@ final class WindowFrameTestMatrixClient: MatrixClientFacade, @unchecked Sendable
     func approveVerification(for accountID: AccountIdentifier) async {}
     func declineVerification(for accountID: AccountIdentifier) async {}
     func cancelVerification(for accountID: AccountIdentifier) async {}
-    func markRoomAsRead(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async {}
+    func markRoomAsRead(_ roomID: RoomIdentifier, upTo eventID: String, accountID: AccountIdentifier) async {}
     func joinRoom(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {}
     func sendMessage(_ body: String, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {}
     func sendMedia(_ attachment: OutgoingMediaAttachment, in roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {}

@@ -81,6 +81,62 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func mediaPreviewHeightUpdatesOnlyInvalidateRowsThatAreVisible() {
+        struct Row {
+            let id: String
+            let previewIsAvailable: Bool
+        }
+
+        let rows = [
+            Row(id: "above", previewIsAvailable: true),
+            Row(id: "visible", previewIsAvailable: true),
+            Row(id: "below", previewIsAvailable: true)
+        ]
+
+        let invalidatedRows = TimelineMediaHeightUpdatePlan.visibleChangedRows(
+            items: rows,
+            visibleRows: IndexSet(integer: 1),
+            appliedPreviewAvailabilityByItemID: [
+                "above": false,
+                "visible": false,
+                "below": false
+            ],
+            id: \.id,
+            previewIsAvailable: \.previewIsAvailable
+        )
+
+        #expect(invalidatedRows == IndexSet(integer: 1))
+    }
+
+    @Test
+    func appendingLatestMessageUsesTrailingInsertionInsteadOfReloadingTheWholeTimeline() {
+        struct Row: Equatable {
+            let id: String
+            let body: String
+        }
+
+        let previousRows = [
+            Row(id: "older", body: "Older message"),
+            Row(id: "latest", body: "Current newest message")
+        ]
+        let currentRows = previousRows + [
+            Row(id: "newest", body: "Incoming newest message")
+        ]
+
+        let plan = TimelineTableUpdatePlan.mutation(
+            previousItems: previousRows,
+            currentItems: currentRows,
+            id: \.id
+        )
+
+        #expect(plan == TimelineTableUpdatePlan(
+            deletedRows: [],
+            insertedRows: IndexSet(integer: 2),
+            reloadedRows: []
+        ))
+    }
+
+    @Test
     func boundaryStatusRecompactionUsesLeadingRowReplacementInsteadOfReloadingTheWholeTimeline() {
         struct Row: Equatable {
             let id: String

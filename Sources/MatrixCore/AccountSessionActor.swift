@@ -865,15 +865,12 @@ public actor AccountSessionActor {
         return await receiptAvatarCache.fileURL(for: avatarURL)
     }
 
-    public func markRoomAsRead(_ roomID: RoomIdentifier) async {
+    public func markRoomAsRead(_ roomID: RoomIdentifier, upTo viewedEventID: String) async {
         guard let latestRemoteEventID = await latestRemoteEventID(for: roomID),
-              lastMarkedReadEventIDByRoom[roomID] != latestRemoteEventID else {
+              latestRemoteEventID == viewedEventID,
+              lastMarkedReadEventIDByRoom[roomID] != viewedEventID else {
             return
         }
-
-        lastMarkedReadEventIDByRoom[roomID] = latestRemoteEventID
-        readMarkerOverridesByRoom[roomID] = ReadMarkerOverride(eventID: latestRemoteEventID, appliedAt: .now)
-        await clearUnreadCounts(for: roomID)
 
         do {
             let room: Room
@@ -890,6 +887,9 @@ public actor AccountSessionActor {
 
             try await room.markAsRead(receiptType: .read)
             try? await room.markAsRead(receiptType: .fullyRead)
+            lastMarkedReadEventIDByRoom[roomID] = viewedEventID
+            readMarkerOverridesByRoom[roomID] = ReadMarkerOverride(eventID: viewedEventID, appliedAt: .now)
+            await clearUnreadCounts(for: roomID)
         } catch {
             await diagnostics.record(.error, category: "Receipts", message: "Failed to mark room as read", metadata: [
                 "roomID": roomID.rawValue,
@@ -1150,14 +1150,18 @@ public actor AccountSessionActor {
             }
             let timelineItems = displayTimelineItemsByRoom[roomID] ?? []
             let latest = timelineItems.last
+            // RoomInfo is refreshed by both Sliding Sync and classic /sync.
+            // Keep its server-provided notification counters here rather than
+            // dropping to zero whenever the fallback transport is active.
+            let serverSummary = await buildRoomSummary(from: room)
             summaries.append(RoomSummary(
                 roomID: roomID,
                 displayName: room.displayName() ?? room.canonicalAlias() ?? roomID.rawValue,
                 topic: room.topic() ?? "",
                 lastMessagePreview: latest.map(roomPreviewText(for:)) ?? (isSpace ? "Space" : ""),
                 timestamp: latest?.timestamp ?? .distantPast,
-                unreadCount: 0,
-                highlightCount: 0,
+                unreadCount: serverSummary?.unreadCount ?? 0,
+                highlightCount: serverSummary?.highlightCount ?? 0,
                 isDirect: await room.isDirect(),
                 isEncrypted: await room.isEncrypted(),
                 lastSenderDisplayName: latest?.senderDisplayName ?? "",

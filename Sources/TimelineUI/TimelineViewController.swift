@@ -20,7 +20,7 @@ public protocol TimelineWorkspaceState: AnyObject {
     func prepareMedia(for item: TimelineItem, prefetchOriginal: Bool)
     func resolveOriginalMediaURL(for item: TimelineItem) async -> URL?
     func resolveReceiptAvatarFileURL(for receipt: ReadReceipt) async -> URL?
-    func markSelectedRoomAsRead()
+    func markSelectedRoomAsRead(upTo eventID: String)
     func sendMessage(_ body: String)
     func sendMedia(_ attachment: OutgoingMediaAttachment)
     func joinSelectedRoom()
@@ -1165,7 +1165,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private func reloadTimeline() {
         let composerWasFirst = view.window?.firstResponder === composerBar.textView
         let newItems = state.timelineItems
-        let updatePlan = TimelineTableUpdatePlan.leadingMutation(
+        let updatePlan = TimelineTableUpdatePlan.mutation(
             previousItems: renderedTimelineItems,
             currentItems: newItems,
             id: \.id
@@ -1220,13 +1220,27 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         guard !state.timelineItems.isEmpty else { return }
 
         let currentAvailability = currentMediaPreviewAvailability()
-        var heightsNeedUpdate = IndexSet()
-        for (row, item) in state.timelineItems.enumerated() where item.media != nil {
-            if mediaPreviewAvailabilityByItemID[item.id] != currentAvailability[item.id] {
-                heightsNeedUpdate.insert(row)
-            }
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let visibleRange = tableView.rows(in: visibleRect)
+        let visibleRows: IndexSet
+        if visibleRange.location == NSNotFound || visibleRange.length == 0 {
+            visibleRows = []
+        } else {
+            let upperBound = min(tableView.numberOfRows, visibleRange.location + visibleRange.length)
+            visibleRows = IndexSet(integersIn: visibleRange.location..<upperBound)
         }
-        mediaPreviewAvailabilityByItemID = currentAvailability
+        let heightsNeedUpdate = TimelineMediaHeightUpdatePlan.visibleChangedRows(
+            items: state.timelineItems,
+            visibleRows: visibleRows,
+            appliedPreviewAvailabilityByItemID: mediaPreviewAvailabilityByItemID,
+            id: \.id,
+            previewIsAvailable: { currentAvailability[$0.id] ?? false }
+        )
+        for row in visibleRows {
+            let item = state.timelineItems[row]
+            guard item.media != nil else { continue }
+            mediaPreviewAvailabilityByItemID[item.id] = currentAvailability[item.id] ?? false
+        }
 
         let request = heightsNeedUpdate.isEmpty
             ? nil
@@ -1275,6 +1289,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         guard !observedDuringRestore,
               observedGeneration == scrollRestoreCoordinator.currentGeneration,
               !isRestoringScroll else { return }
+        refreshVisibleMediaRows()
         liveFollow.applyUserScroll(isAtBottom: isScrolledToBottom())
         updateJumpToLatestButtonVisibility()
         if liveFollow.isFollowingLiveTraffic {
@@ -1428,14 +1443,27 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         )
     }
 
+    private func newestVisibleRemoteMessageEventID() -> String? {
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let rows = tableView.rows(in: visibleRect)
+        guard rows.location != NSNotFound, rows.length > 0 else { return nil }
+        let upperBound = min(state.timelineItems.count, rows.location + rows.length)
+        guard rows.location < upperBound else { return nil }
+        return state.timelineItems[rows.location..<upperBound]
+            .reversed()
+            .first(where: { $0.kind == .message && $0.id.hasPrefix("$") })?
+            .id
+    }
+
     private func scheduleMarkSelectedRoomAsRead() {
         guard !state.timelineItems.isEmpty else { return }
         pendingReadMarkTask?.cancel()
         pendingReadMarkTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
-            guard let self, !Task.isCancelled else { return }
+            guard let self, !Task.isCancelled, self.isScrolledToBottom(),
+                  let viewedEventID = self.newestVisibleRemoteMessageEventID() else { return }
             await MainActor.run {
-                self.state.markSelectedRoomAsRead()
+                self.state.markSelectedRoomAsRead(upTo: viewedEventID)
             }
         }
     }

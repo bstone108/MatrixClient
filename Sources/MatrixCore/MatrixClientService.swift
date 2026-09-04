@@ -308,9 +308,9 @@ public actor MatrixClientService: MatrixClientFacade {
         }
     }
 
-    public func markRoomAsRead(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async {
+    public func markRoomAsRead(_ roomID: RoomIdentifier, upTo eventID: String, accountID: AccountIdentifier) async {
         guard let session = sessions[accountID] else { return }
-        await session.markRoomAsRead(roomID)
+        await session.markRoomAsRead(roomID, upTo: eventID)
     }
 
     public func joinRoom(_ roomID: RoomIdentifier, accountID: AccountIdentifier) async throws {

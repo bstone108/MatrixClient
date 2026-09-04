@@ -213,7 +213,6 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
             guard let self else { return }
             await self.loadRoomDetails()
             await self.subscribeToTimeline()
-            self.markSelectedRoomAsRead()
         }
     }
 
@@ -276,11 +275,11 @@ public final class WorkspaceStateController: NSObject, TimelineWorkspaceState, L
         notify(composerNoticeObservers)
     }
 
-    public func markSelectedRoomAsRead() {
+    public func markSelectedRoomAsRead(upTo eventID: String) {
         guard let selectedRoomID, let selectedAccountID else { return }
         Task { [weak self] in
             guard let self else { return }
-            await self.matrixClient.markRoomAsRead(selectedRoomID, accountID: selectedAccountID)
+            await self.matrixClient.markRoomAsRead(selectedRoomID, upTo: eventID, accountID: selectedAccountID)
         }
     }
 

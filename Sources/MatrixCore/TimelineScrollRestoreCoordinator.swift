@@ -30,6 +30,25 @@ public struct TimelineScrollRestoreRequest: Equatable, Sendable {
 /// Progress/banner updates do not mutate the viewport, and a new real geometry
 /// change invalidates a previously queued restore without recapturing a transient
 /// AppKit viewport position.
+public enum TimelineMediaHeightUpdatePlan {
+    /// Image rows whose preview state changed must only be remeasured while
+    /// visible. Offscreen rows keep their prior measured height until they
+    /// enter the viewport, avoiding geometry churn above or below the reader.
+    public static func visibleChangedRows<Item>(
+        items: [Item],
+        visibleRows: IndexSet,
+        appliedPreviewAvailabilityByItemID: [String: Bool],
+        id: (Item) -> String,
+        previewIsAvailable: (Item) -> Bool
+    ) -> IndexSet {
+        IndexSet(visibleRows.compactMap { row in
+            guard items.indices.contains(row) else { return nil }
+            let item = items[row]
+            return appliedPreviewAvailabilityByItemID[id(item)] == previewIsAvailable(item) ? nil : row
+        })
+    }
+}
+
 /// A staged table transaction that leaves an unchanged trailing portion of a
 /// timeline in place. This covers history pages that recompact/replace one or
 /// more *leading* presentation rows while retaining the reader's visible rows.
@@ -49,6 +68,57 @@ public struct TimelineTableUpdatePlan: Equatable, Sendable {
     /// content are reloaded in place; unmatched leading rows are replaced.
     /// Returns nil when no stable suffix exists and a full snapshot reload is
     /// still required.
+    /// Creates a minimal transaction for changes confined to either edge of a
+    /// timeline. History pages replace the leading edge; ordinary incoming
+    /// messages append at the trailing edge. Retained rows are reloaded only
+    /// when their presentation changed.
+    public static func mutation<Item: Equatable>(
+        previousItems: [Item],
+        currentItems: [Item],
+        id: (Item) -> String
+    ) -> Self? {
+        if let leadingPlan = leadingMutation(
+            previousItems: previousItems,
+            currentItems: currentItems,
+            id: id
+        ) {
+            return leadingPlan
+        }
+
+        guard !previousItems.isEmpty, !currentItems.isEmpty else {
+            return nil
+        }
+
+        var commonPrefixCount = 0
+        let prefixLimit = min(previousItems.count, currentItems.count)
+        while commonPrefixCount < prefixLimit,
+              id(previousItems[commonPrefixCount]) == id(currentItems[commonPrefixCount]) {
+            commonPrefixCount += 1
+        }
+
+        guard commonPrefixCount > 0 else {
+            return nil
+        }
+
+        let deletedRows = IndexSet(integersIn: commonPrefixCount..<previousItems.count)
+        let insertedRows = IndexSet(integersIn: commonPrefixCount..<currentItems.count)
+        let reloadedRows = IndexSet(
+            (0..<commonPrefixCount).compactMap { index in
+                previousItems[index] == currentItems[index] ? nil : index
+            }
+        )
+
+        guard !deletedRows.isEmpty || !insertedRows.isEmpty || !reloadedRows.isEmpty else {
+            return nil
+        }
+
+        return Self(
+            deletedRows: deletedRows,
+            insertedRows: insertedRows,
+            reloadedRows: reloadedRows
+        )
+    }
+
     public static func leadingMutation<Item: Equatable>(
         previousItems: [Item],
         currentItems: [Item],
