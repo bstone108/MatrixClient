@@ -81,6 +81,34 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func mediaPreviewHeightUpdatesOnlyInvalidateRowsThatAreVisible() {
+        struct Row {
+            let id: String
+            let previewIsAvailable: Bool
+        }
+
+        let rows = [
+            Row(id: "above", previewIsAvailable: true),
+            Row(id: "visible", previewIsAvailable: true),
+            Row(id: "below", previewIsAvailable: true)
+        ]
+
+        let invalidatedRows = TimelineMediaHeightUpdatePlan.visibleChangedRows(
+            items: rows,
+            visibleRows: IndexSet(integer: 1),
+            appliedPreviewAvailabilityByItemID: [
+                "above": false,
+                "visible": false,
+                "below": false
+            ],
+            id: \.id,
+            previewIsAvailable: \.previewIsAvailable
+        )
+
+        #expect(invalidatedRows == IndexSet(integer: 1))
+    }
+
+    @Test
     func appendingLatestMessageUsesTrailingInsertionInsteadOfReloadingTheWholeTimeline() {
         struct Row: Equatable {
             let id: String
