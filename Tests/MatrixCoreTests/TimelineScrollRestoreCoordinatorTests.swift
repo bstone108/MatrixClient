@@ -81,6 +81,38 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func boundaryStatusRecompactionUsesLeadingRowReplacementInsteadOfReloadingTheWholeTimeline() {
+        struct Row: Equatable {
+            let id: String
+            let body: String
+        }
+
+        let previousRows = [
+            Row(id: "status-a-b", body: "A and B changed the room"),
+            Row(id: "visible", body: "Keep this message at its exact viewport offset"),
+            Row(id: "latest", body: "Latest message")
+        ]
+        let currentRows = [
+            Row(id: "older-status-c", body: "C changed the room"),
+            Row(id: "status-c-b", body: "C, A and B changed the room"),
+            Row(id: "visible", body: "Keep this message at its exact viewport offset"),
+            Row(id: "latest", body: "Latest message")
+        ]
+
+        let plan = TimelineTableUpdatePlan.leadingMutation(
+            previousItems: previousRows,
+            currentItems: currentRows,
+            id: \.id
+        )
+
+        #expect(plan == TimelineTableUpdatePlan(
+            deletedRows: IndexSet(integer: 0),
+            insertedRows: IndexSet(integersIn: 0..<2),
+            reloadedRows: []
+        ))
+    }
+
+    @Test
     func restoringAValidRequestExecutesTheAnchorInTheCurrentLayoutPass() throws {
         var coordinator = TimelineScrollRestoreCoordinator()
         let requestOptional = coordinator.begin(
