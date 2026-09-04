@@ -25,9 +25,9 @@ set -euo pipefail
 #   APPLE_TEAM_ID
 #
 # Versioning:
-#   MATRIXCLIENT_RELEASE=1  assign YYYY.M.D.N (America/Chicago) for a real
-#                           GitHub release. N is max(existing tag/release)+1.
-#   MATRIXCLIENT_VERSION    when releasing from an already-pushed vYYYY.M.D.N
+#   MATRIXCLIENT_RELEASE=1  assign YYYY.MM.DD.BB (America/Chicago) for a real
+#                           GitHub release. BB is max(existing tag/release)+1.
+#   MATRIXCLIENT_VERSION    when releasing from an already-pushed vYYYY.MM.DD.BB
 #                           tag, use that version instead of incrementing.
 #   Pull-request / verification runs must leave MATRIXCLIENT_RELEASE unset.
 #   They keep the committed Info.plist template (0.1.0 / 1) inside the bundle
@@ -68,7 +68,7 @@ is_release_packaging() {
 }
 
 looks_like_date_build() {
-  [[ "${1:-}" =~ ^[0-9]{4}\.([1-9]|1[0-2])\.([1-9]|[12][0-9]|3[01])\.[1-9][0-9]*$ ]]
+  [[ "${1:-}" =~ ^[0-9]{4}\.(0[1-9]|1[0-2])\.(0[1-9]|[12][0-9]|3[01])\.(0[1-9]|[1-9][0-9])$ ]]
 }
 
 resolve_packaging_version() {
