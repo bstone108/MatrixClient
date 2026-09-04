@@ -81,6 +81,34 @@ struct TimelineScrollRestoreCoordinatorTests {
     }
 
     @Test
+    func appendingLatestMessageUsesTrailingInsertionInsteadOfReloadingTheWholeTimeline() {
+        struct Row: Equatable {
+            let id: String
+            let body: String
+        }
+
+        let previousRows = [
+            Row(id: "older", body: "Older message"),
+            Row(id: "latest", body: "Current newest message")
+        ]
+        let currentRows = previousRows + [
+            Row(id: "newest", body: "Incoming newest message")
+        ]
+
+        let plan = TimelineTableUpdatePlan.mutation(
+            previousItems: previousRows,
+            currentItems: currentRows,
+            id: \.id
+        )
+
+        #expect(plan == TimelineTableUpdatePlan(
+            deletedRows: [],
+            insertedRows: IndexSet(integer: 2),
+            reloadedRows: []
+        ))
+    }
+
+    @Test
     func boundaryStatusRecompactionUsesLeadingRowReplacementInsteadOfReloadingTheWholeTimeline() {
         struct Row: Equatable {
             let id: String
