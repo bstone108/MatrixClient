@@ -1654,7 +1654,16 @@ public actor AccountSessionActor {
             timeline: timeline
         )
         sdkTimelineItemsByRoom[roomID] = resolvedSDKItems
-        let current = derivedDisplayTimeline(from: resolvedSDKItems)
+        let displaySourceItems: [TimelineItem]
+        if previousSDKItems.isEmpty, !previousItems.isEmpty {
+            displaySourceItems = TimelineItemReconciler.mergedInitialSDKWindow(
+                sdkItems: resolvedSDKItems,
+                cachedDisplayItems: previousItems
+            )
+        } else {
+            displaySourceItems = resolvedSDKItems
+        }
+        let current = derivedDisplayTimeline(from: displaySourceItems)
         displayTimelineItemsByRoom[roomID] = current
         let currentLatest = latestRemoteMessage(in: current)
         let diagnosticMetadata = [
