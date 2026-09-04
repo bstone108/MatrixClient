@@ -49,6 +49,57 @@ public struct TimelineTableUpdatePlan: Equatable, Sendable {
     /// content are reloaded in place; unmatched leading rows are replaced.
     /// Returns nil when no stable suffix exists and a full snapshot reload is
     /// still required.
+    /// Creates a minimal transaction for changes confined to either edge of a
+    /// timeline. History pages replace the leading edge; ordinary incoming
+    /// messages append at the trailing edge. Retained rows are reloaded only
+    /// when their presentation changed.
+    public static func mutation<Item: Equatable>(
+        previousItems: [Item],
+        currentItems: [Item],
+        id: (Item) -> String
+    ) -> Self? {
+        if let leadingPlan = leadingMutation(
+            previousItems: previousItems,
+            currentItems: currentItems,
+            id: id
+        ) {
+            return leadingPlan
+        }
+
+        guard !previousItems.isEmpty, !currentItems.isEmpty else {
+            return nil
+        }
+
+        var commonPrefixCount = 0
+        let prefixLimit = min(previousItems.count, currentItems.count)
+        while commonPrefixCount < prefixLimit,
+              id(previousItems[commonPrefixCount]) == id(currentItems[commonPrefixCount]) {
+            commonPrefixCount += 1
+        }
+
+        guard commonPrefixCount > 0 else {
+            return nil
+        }
+
+        let deletedRows = IndexSet(integersIn: commonPrefixCount..<previousItems.count)
+        let insertedRows = IndexSet(integersIn: commonPrefixCount..<currentItems.count)
+        let reloadedRows = IndexSet(
+            (0..<commonPrefixCount).compactMap { index in
+                previousItems[index] == currentItems[index] ? nil : index
+            }
+        )
+
+        guard !deletedRows.isEmpty || !insertedRows.isEmpty || !reloadedRows.isEmpty else {
+            return nil
+        }
+
+        return Self(
+            deletedRows: deletedRows,
+            insertedRows: insertedRows,
+            reloadedRows: reloadedRows
+        )
+    }
+
     public static func leadingMutation<Item: Equatable>(
         previousItems: [Item],
         currentItems: [Item],

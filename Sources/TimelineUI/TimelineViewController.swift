@@ -1165,7 +1165,7 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
     private func reloadTimeline() {
         let composerWasFirst = view.window?.firstResponder === composerBar.textView
         let newItems = state.timelineItems
-        let updatePlan = TimelineTableUpdatePlan.leadingMutation(
+        let updatePlan = TimelineTableUpdatePlan.mutation(
             previousItems: renderedTimelineItems,
             currentItems: newItems,
             id: \.id
