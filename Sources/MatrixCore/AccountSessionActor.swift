@@ -1150,14 +1150,18 @@ public actor AccountSessionActor {
             }
             let timelineItems = displayTimelineItemsByRoom[roomID] ?? []
             let latest = timelineItems.last
+            // RoomInfo is refreshed by both Sliding Sync and classic /sync.
+            // Keep its server-provided notification counters here rather than
+            // dropping to zero whenever the fallback transport is active.
+            let serverSummary = await buildRoomSummary(from: room)
             summaries.append(RoomSummary(
                 roomID: roomID,
                 displayName: room.displayName() ?? room.canonicalAlias() ?? roomID.rawValue,
                 topic: room.topic() ?? "",
                 lastMessagePreview: latest.map(roomPreviewText(for:)) ?? (isSpace ? "Space" : ""),
                 timestamp: latest?.timestamp ?? .distantPast,
-                unreadCount: 0,
-                highlightCount: 0,
+                unreadCount: serverSummary?.unreadCount ?? 0,
+                highlightCount: serverSummary?.highlightCount ?? 0,
                 isDirect: await room.isDirect(),
                 isEncrypted: await room.isEncrypted(),
                 lastSenderDisplayName: latest?.senderDisplayName ?? "",
