@@ -20,7 +20,7 @@ public protocol TimelineWorkspaceState: AnyObject {
     func prepareMedia(for item: TimelineItem, prefetchOriginal: Bool)
     func resolveOriginalMediaURL(for item: TimelineItem) async -> URL?
     func resolveReceiptAvatarFileURL(for receipt: ReadReceipt) async -> URL?
-    func markSelectedRoomAsRead()
+    func markSelectedRoomAsRead(upTo eventID: String)
     func sendMessage(_ body: String)
     func sendMedia(_ attachment: OutgoingMediaAttachment)
     func joinSelectedRoom()
@@ -1443,14 +1443,27 @@ public final class TimelineViewController: NSViewController, NSTableViewDataSour
         )
     }
 
+    private func newestVisibleRemoteMessageEventID() -> String? {
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let rows = tableView.rows(in: visibleRect)
+        guard rows.location != NSNotFound, rows.length > 0 else { return nil }
+        let upperBound = min(state.timelineItems.count, rows.location + rows.length)
+        guard rows.location < upperBound else { return nil }
+        return state.timelineItems[rows.location..<upperBound]
+            .reversed()
+            .first(where: { $0.kind == .message && $0.id.hasPrefix("$") })?
+            .id
+    }
+
     private func scheduleMarkSelectedRoomAsRead() {
         guard !state.timelineItems.isEmpty else { return }
         pendingReadMarkTask?.cancel()
         pendingReadMarkTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
-            guard let self, !Task.isCancelled, self.isScrolledToBottom() else { return }
+            guard let self, !Task.isCancelled, self.isScrolledToBottom(),
+                  let viewedEventID = self.newestVisibleRemoteMessageEventID() else { return }
             await MainActor.run {
-                self.state.markSelectedRoomAsRead()
+                self.state.markSelectedRoomAsRead(upTo: viewedEventID)
             }
         }
     }

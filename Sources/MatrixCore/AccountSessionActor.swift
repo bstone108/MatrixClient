@@ -865,15 +865,12 @@ public actor AccountSessionActor {
         return await receiptAvatarCache.fileURL(for: avatarURL)
     }
 
-    public func markRoomAsRead(_ roomID: RoomIdentifier) async {
+    public func markRoomAsRead(_ roomID: RoomIdentifier, upTo viewedEventID: String) async {
         guard let latestRemoteEventID = await latestRemoteEventID(for: roomID),
-              lastMarkedReadEventIDByRoom[roomID] != latestRemoteEventID else {
+              latestRemoteEventID == viewedEventID,
+              lastMarkedReadEventIDByRoom[roomID] != viewedEventID else {
             return
         }
-
-        lastMarkedReadEventIDByRoom[roomID] = latestRemoteEventID
-        readMarkerOverridesByRoom[roomID] = ReadMarkerOverride(eventID: latestRemoteEventID, appliedAt: .now)
-        await clearUnreadCounts(for: roomID)
 
         do {
             let room: Room
@@ -890,6 +887,9 @@ public actor AccountSessionActor {
 
             try await room.markAsRead(receiptType: .read)
             try? await room.markAsRead(receiptType: .fullyRead)
+            lastMarkedReadEventIDByRoom[roomID] = viewedEventID
+            readMarkerOverridesByRoom[roomID] = ReadMarkerOverride(eventID: viewedEventID, appliedAt: .now)
+            await clearUnreadCounts(for: roomID)
         } catch {
             await diagnostics.record(.error, category: "Receipts", message: "Failed to mark room as read", metadata: [
                 "roomID": roomID.rawValue,
