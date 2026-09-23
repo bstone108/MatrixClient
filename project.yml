@@ -10,7 +10,9 @@ settings:
 packages:
   MatrixRustSDK:
     url: https://github.com/matrix-org/matrix-rust-components-swift.git
-    branch: main
+    # Tag 26.08.11. CodeQL Autobuild re-resolves branch `main` and newer SDK
+    # commits (26.09.07+) remove RoomListService.subscribeToRooms.
+    revision: 462ae1a446cd3294158c8353468a6d6fe66c71d9
   GRDB:
     url: https://github.com/groue/GRDB.swift.git
     from: 7.9.0
